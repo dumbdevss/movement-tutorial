@@ -81,7 +81,7 @@ The project is structured to clearly separate smart contract logic from user int
 - **`packages/move`**: Contains the Move smart contracts
   - **`sources`**: Core Move modules defining the logic for document management
 
-- **`/frontend`**: Next.js application providing the user interface
+- **`/nextjs`**: Next.js application providing the user interface
   - **`/components`**: Reusable React components
   - **`/app`**: Application routes and pages
   - **`/hooks/scaffold-move`**: Custom React hooks for blockchain interaction
@@ -98,6 +98,6 @@ With our development environment set up and project structure understood, we'll 
 - Version history tracking
 - Secure sharing capabilities
 
-Next Tutorial: [Building the Smart Contract](./building-smart-contract.md)
+Next Tutorial: [Building the Smart Contract](./developing_smart_contract)
 
 Stay tuned as we build a robust document management solution on Movement's blockchain infrastructure.
