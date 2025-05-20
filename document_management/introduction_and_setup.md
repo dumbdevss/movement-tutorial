@@ -7,6 +7,7 @@ date: "2025-05-19"
 ---
 
 ## Introduction
+
 Blockchain-based document management offers revolutionary advantages over traditional systems, providing enhanced security, immutability, and verifiable ownership.
 
 In this guide, we'll walk you through building a document management decentralized application (dApp) using the Move programming language on the Movement testnet. This dApp will allow users to securely store document metadata on-chain, control access permissions, and maintain a verifiable history of document interactions.
@@ -40,6 +41,7 @@ To begin building our document management dApp, we'll set up an efficient develo
 
 1. **Clone the Repository**  
    Clone the tutorial repository, which has been bootstrapped with `scaffold-move` for Movement development:
+
    ```bash
    git clone https://github.com/dumbdevss/document-management
    cd document-management
@@ -47,23 +49,27 @@ To begin building our document management dApp, we'll set up an efficient develo
 
 2. **Install Dependencies**
    Install the necessary project dependencies:
+
    ```bash
    yarn install
    ```
 
 3. **Generate a Deployment Account**
    Create a local account for interacting with the Movement testnet:
+
    ```bash
    yarn account
    ```
 
    After initialization, note the generated account address and update the `Move.toml` file:
+
    ```toml
    [addresses]
    document_management = "<your_generated_account_address>"
    ```
 
    > **Note**: If you encounter an error, navigate to the `packages/move` directory and use:
+
    ```bash
    movement init --network custom --rest-url https://testnet.bardock.movementnetwork.xyz/v1 --faucet-url https://faucet.testnet.bardock.movementnetwork.xyz/
    ```
@@ -91,5 +97,7 @@ With our development environment set up and project structure understood, we'll 
 - Access control and permissions
 - Version history tracking
 - Secure sharing capabilities
+
+Next Tutorial: [Building the Smart Contract](./building-smart-contract.md)
 
 Stay tuned as we build a robust document management solution on Movement's blockchain infrastructure.

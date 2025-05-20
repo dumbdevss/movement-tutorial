@@ -1,22 +1,8 @@
-# NFT Ticketing Contract Tutorial - Part 2
+# NFT Ticketing Contract Tutorial - Implementation Guide
 
-In this section of our tutorial, we'll be walking through the completed secure document management system that we started building earlier. This fully-functional Move module allows users to upload documents with IPFS storage, add signers, and manage digital signatures securely on the Aptos blockchain.
+This guide walks through each TODO item in the secure document management system with clear explanations and implementation details. Follow these steps to complete your Move module implementation.
 
-## Contract Overview
-
-The `secure_docs` module provides a robust system for document management with the following key features:
-- Document upload with IPFS storage integration
-- Fee-based document upload using Aptos Coin (APT)
-- Adding and removing authorized signers
-- Digital signature collection
-- Comprehensive event tracking
-- View functions for data access
-
-Let's go through the implementation step by step, following the TODO items from our starter code.
-
-## Step 1: Defining Constants
-
-First, we need to define the module's constants:
+## TODO 1: Define Constants
 
 ```move
 // Constants
@@ -24,11 +10,13 @@ const SEED: vector<u8> = b"secure_docs";
 const UPLOAD_FEE: u64 = 5000000; // 0.05 APT (in microAPT, 1 APT = 10^8 microAPT)
 ```
 
-The `SEED` is used to create a deterministic resource account, while the `UPLOAD_FEE` defines how much users pay to upload a document.
+**Implementation steps:**
 
-## Step 2: Creating the Document Struct
+1. Define `SEED` as a byte vector to create a deterministic resource account
+2. Set `UPLOAD_FEE` in microAPT (0.05 APT = 5,000,000 microAPT)
+3. These constants will be used throughout the module for consistency
 
-Next, we need a struct to store document metadata:
+## TODO 2: Create Document Struct
 
 ```move
 struct Document has store, drop, copy {
@@ -42,11 +30,15 @@ struct Document has store, drop, copy {
 }
 ```
 
-This struct includes all necessary fields to track a document's metadata and signature status. The `has store, drop, copy` abilities allow for flexible storage and manipulation.
+**Implementation steps:**
 
-## Step 3: Creating the State Struct
+1. Define a struct with `store`, `drop`, and `copy` abilities
+2. Include fields for document metadata (ID, name, IPFS hash)
+3. Add timestamp field for audit purposes
+4. Include ownership tracking with `owner` field
+5. Add vectors to track both actual signatures and authorized signers
 
-For global state management, we create:
+## TODO 3: Create State Struct
 
 ```move
 struct DocState has key {
@@ -60,11 +52,15 @@ struct DocState has key {
 }
 ```
 
-This struct stores the module's state, including document storage (both indexed and in sequence), event handlers, and administrative information.
+**Implementation steps:**
 
-## Step 4: Creating Event Structs
+1. Create a struct with `key` ability for global storage
+2. Store admin address for privileged operations
+3. Use both a Table (for O(1) lookups) and a vector (for iteration)
+4. Include a counter to track the number of documents
+5. Add EventHandles for each event type to enable off-chain tracking
 
-For event tracking, we define:
+## TODO 4: Create Event Structs
 
 ```move
 #[event]
@@ -89,11 +85,14 @@ struct ShareEvent has drop, store {
 }
 ```
 
-These events allow off-chain tracking of document uploads, signatures, and permission grants.
+**Implementation steps:**
 
-## Step 5: Initializing the Module
+1. Create structs for each event type with `#[event]` annotation
+2. Include `drop` and `store` abilities for all event structs
+3. Each event contains relevant data for off-chain tracking
+4. Keep events compact with only necessary information
 
-The `init_module` function sets up our system and it called once the contract is deployed:
+## TODO 5: Initialize Module
 
 ```move
 fun init_module(admin: &signer) {
@@ -126,11 +125,15 @@ fun init_module(admin: &signer) {
 }
 ```
 
-This creates a resource account to hold the contract state and registers it for APT coin operations.
+**Implementation steps:**
 
-## Steps 6-8: Helper Functions
+1. Get the admin's address for authorization
+2. Create a resource account using the `SEED` constant
+3. Register the resource account for Aptos Coin operations
+4. Initialize the `DocState` with empty collections and event handles
+5. Store the `SignerCapability` for the resource account under the admin's address
 
-These helper functions make our code cleaner:
+## TODO 6-8: Helper Functions
 
 ```move
 fun get_resource_address(): address acquires ResourceAccountCap {
@@ -147,9 +150,13 @@ fun assert_is_owner(document: &Document, account: &signer) {
 }
 ```
 
-## Steps 9-10: Document Upload Function
+**Implementation steps:**
 
-The document upload function handles payment and document creation:
+1. Create a helper to get the resource account address
+2. Implement document existence validation
+3. Create an ownership assertion helper
+
+## TODO 9-10: Document Upload Function Logic
 
 ```move
 // Handle payment
@@ -182,9 +189,16 @@ event::emit_event(&mut state.upload_events, UploadEvent {
 });
 ```
 
-## Step 11: Adding Signers
+**Implementation steps:**
 
-The `add_signer` function allows document owners to add authorized signers:
+1. Verify the user has sufficient APT balance
+2. Withdraw the upload fee and deposit to resource account
+3. Create a new Document struct with appropriate fields
+4. Store the document in both table and vector
+5. Increment document counter
+6. Emit upload event for off-chain tracking
+
+## TODO 11: Implement Add Signer Function
 
 ```move
 public entry fun add_signer(
@@ -223,9 +237,15 @@ public entry fun add_signer(
 }
 ```
 
-## Step 12: Signing Documents
+**Implementation steps:**
 
-The `sign_document` function enables authorized users to sign documents:
+1. Access the global state
+2. Verify document exists and caller is owner
+3. Update both table and vector entries for consistency
+4. Only add signer if not already present
+5. Emit event for off-chain tracking
+
+## TODO 12: Implement Sign Document Function
 
 ```move
 public entry fun sign_document(
@@ -262,9 +282,15 @@ public entry fun sign_document(
 }
 ```
 
-## Step 13: Removing Signers
+**Implementation steps:**
 
-The `remove_signer` function allows document owners to revoke signing privileges:
+1. Get signer address and access global state
+2. Verify document exists
+3. Verify signer is authorized and hasn't signed already
+4. Update both table and vector entries
+5. Emit signature event
+
+## TODO 13: Implement Remove Signer Function
 
 ```move
 public entry fun remove_signer(
@@ -299,9 +325,17 @@ public entry fun remove_signer(
 }
 ```
 
-## Steps 14-16: View Functions
+**Implementation steps:**
 
-Finally, the view functions provide data access without modifying state:
+1. Access global state and verify document exists
+2. Verify caller is document owner
+3. Find signer in the allowed signers list
+4. Remove signer from both table and vector entries
+5. Abort if signer not found
+
+## TODO 14-16: Implement View Functions
+
+### TODO 14: Implement `get_document` View Function
 
 ```move
 #[view]
@@ -312,7 +346,19 @@ public fun get_document(id: String): (String, String, u64, address, vector<addre
     let doc = table::borrow(&state.documents, id);
     (doc.name, doc.ipfs_hash, doc.created_at, doc.owner, doc.signatures, doc.allowed_signers)
 }
+```
 
+**Implementation steps:**
+
+1. Add `#[view]` annotation to mark this as a read-only function
+2. Acquire global state using `borrow_global` (not `borrow_global_mut`)
+3. Verify document exists with the helper function
+4. Return document data as a tuple of values
+5. Include all relevant document fields (name, IPFS hash, timestamp, owner, signatures, allowed signers)
+
+### TODO 15: Implement `get_documents_for_signer` View Function
+
+```move
 #[view]
 public fun get_documents_for_signer(
     user_addr: address
@@ -332,7 +378,20 @@ public fun get_documents_for_signer(
 
     result
 }
+```
 
+**Implementation steps:**
+
+1. Add `#[view]` annotation for read-only function
+2. Create an empty result vector to store matching documents
+3. Iterate through all documents in the `document_vec`
+4. For each document, check if the user's address is in the `allowed_signers` list
+5. If so, add the document to the result vector
+6. Return the filtered list of documents
+
+### TODO 16: Implement `get_documents_by_signer` View Function
+
+```move
 #[view]
 public fun get_documents_by_signer(
     user_addr: address
@@ -354,6 +413,47 @@ public fun get_documents_by_signer(
 }
 ```
 
+**Implementation steps:**
+
+1. Add `#[view]` annotation for read-only function
+2. Create an empty result vector to store matching documents
+3. Iterate through all documents in the `document_vec`
+4. For each document, check if the user's address matches the document's `owner` field
+5. If so, add the document to the result vector
+6. Return the filtered list of documents
+
+## Key Implementation Considerations
+
+1. **Dual Storage Strategy**: The implementation uses both a Table (for fast lookups by ID) and a vector (for iteration), which requires careful synchronization between the two.
+
+2. **Resource Account Pattern**: The module uses Aptos's resource account pattern to manage state and collect fees.
+
+3. **Data Consistency**: When updating document data (adding/removing signers, collecting signatures), both storage structures must be updated in sync.
+
+4. **Authorization Checks**: Before performing sensitive operations, the code verifies that the caller has appropriate permissions.
+
+5. **Event Emission**: Events are emitted for all state-changing operations to enable off-chain tracking.
+
+6. **View Functions**: The module provides several view functions for easy data access without modifying state.
+
+## Testing Recommendations
+
+To ensure your implementation works correctly:
+
+1. Test document upload with valid and invalid IPFS hashes
+2. Verify fee collection works correctly
+3. Test adding and removing signers with different permission scenarios
+4. Verify signature collection with authorized and unauthorized signers
+5. Test view functions to ensure they return expected data
+6. Verify event emission for all state-changing operations
+
 ## Conclusion
 
-The completed secure document management system provides a robust foundation for blockchain-based document signing. It leverages Aptos's resource accounts, tables, and event systems to create a secure and efficient solution. Key points include:
+Congratulations! You've successfully built a complete blockchain document management application by:
+
+1. Implementing the Move smart contract with:
+   - Document creation and storage
+   - Signer management functionality
+   - Secure signature verification
+
+Next Tutorial: [Testing the Document Management DApp](./building_the_document_management_interface)
