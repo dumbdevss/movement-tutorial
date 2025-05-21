@@ -2,6 +2,15 @@
 
 This guide walks through each TODO item in the secure document management system with clear explanations and implementation details. Follow these steps to complete your Move module implementation.
 
+## Source Code Reference
+
+The complete implementation of this smart contract can be found in the repository:
+
+**Repository:** [dumbdevss/document-management](https://github.com/dumbdevss/document-management)  
+**Branch:** `smart-contract`
+
+You can view or clone the finished code to compare against your implementation as you follow along with this guide.
+
 ## TODO 1: Define Constants
 
 ```move
@@ -449,7 +458,7 @@ To ensure your implementation works correctly:
 
 ## Conclusion
 
-Congratulations! You've successfully built a complete blockchain document management application by:
+Congratulations! You've successfully built a complete blockchain document management smart contract by:
 
 1. Implementing the Move smart contract with:
    - Document creation and storage

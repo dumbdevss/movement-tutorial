@@ -2,6 +2,20 @@
 
 This tutorial will guide you through integrating your frontend application with our Move-based NFT ticketing smart contract. You'll learn how to implement ticket purchasing functionality using Scaffold hooks to create a seamless connection between your frontend and the blockchain.
 
+## Source Code Reference
+
+The complete implementation of the frontend interface can be found in the repository:
+
+**Repository:** [dumbdevss/document-management](https://github.com/dumbdevss/document-management)  
+**Branch:** `frontend-integration`
+
+You can view or clone the finished code to compare against your implementation as you follow along with this guide. The frontend code includes:
+
+- React components for document management 
+- Integration with Move smart contracts using Scaffold hooks
+- IPFS integration for file storage
+- Complete styling using Tailwind CSS
+
 ## Document Creation Page (/app/create-document)
 
 Navigate to the document creation page component to implement TODOs 1-12.
@@ -613,7 +627,6 @@ After implementing all TODOs, test each functionality step by step:
    - Navigate to `/app/sign-documents` to see documents requiring signatures
    - View and sign specific documents at `/app/sign-document/[id]`
    - Verify signature appears after signing -->
-
 
 ## Conclusion
 
