@@ -698,4 +698,4 @@ This document management system demonstrates several important blockchain develo
 
 The system balances functionality, security, and performance while providing a foundation for real-world document signing workflows.
 
-Next Tutorial: [Frontend Integration Guide](./building_the_document_management_interface);
+Next Tutorial: [Smart Contract testing](./testing_application)

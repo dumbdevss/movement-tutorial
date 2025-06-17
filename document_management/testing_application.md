@@ -1,14 +1,5 @@
 # Move Smart Contract Testing Tutorial: Document Management System
 
-## Table of Contents
-
-1. [Introduction to Move Testing Framework](#introduction)
-2. [Testing Framework Concepts](#concepts)
-3. [Test Environment Setup](#setup)
-4. [Step-by-Step Testing Guide](#testing-guide)
-5. [Advanced Testing Patterns](#advanced-patterns)
-6. [Running Tests](#running-tests)
-
 ## 1. Introduction to Move Testing Framework {#introduction}
 
 The Move programming language provides a robust testing framework that allows developers to write comprehensive unit tests for their smart contracts. This tutorial will walk you through testing the document management smart contract, covering everything from basic test setup to advanced testing patterns.
@@ -72,8 +63,8 @@ assert!(condition, error_code);  // Basic assertion
 **Best Practice**: Always use meaningful error codes in your assertions. Instead of generic numbers, define constants that make test failures immediately understandable:
 
 ```move
-const E_TEST_DOCUMENT_COUNT_MISMATCH: u64 = 1001;
-const E_TEST_BALANCE_INCORRECT: u64 = 1002;
+const E_NOT_AUTHORIZED: u64 = 1;
+const E_DOCUMENT_NOT_FOUND: u64 = 2;
 ```
 
 ## 3. Test Environment Setup {#setup}
@@ -144,7 +135,6 @@ fun give_coins(mint_cap: &MintCapability<AptosCoin>, to: &signer, amount: u64) {
     
     // Register for APT coin
     // Why: Accounts must explicitly register to receive each coin type
-    // This prevents accidental transfers and gives users control
     coin::register<AptosCoin>(to);
 
     // Mint and deposit coins
@@ -159,6 +149,7 @@ fun give_coins(mint_cap: &MintCapability<AptosCoin>, to: &signer, amount: u64) {
 - Collecting and managing fees automatically
 - Holding assets that belong to the protocol, not individual users
 - Enabling complex financial operations like staking, lending, or escrow
+- Manage resources like a global state struct
 
 ## 4. Step-by-Step Testing Guide {#testing-guide}
 
@@ -239,7 +230,7 @@ fun test_upload_document(
 }
 ```
 
-**Why We Use Vectors vs Tables**: 
+**Why We Use Vectors vs Tables**:
 
 - **Vector for `signatures` and `allowed_signers`**: These are small collections that we iterate through frequently (checking permissions, displaying signatures). Vectors are optimal for iteration and small datasets.
 - **Table for document storage**: Documents are accessed by ID (O(1) lookup) and can grow large. Tables provide efficient key-based access without the O(n) cost of vector searches.
@@ -634,6 +625,10 @@ Smart contract testing isn't just about preventing bugs - it's about:
 4. **Protocol Sustainability**: Ensuring fee collection and tokenomics work correctly
 5. **Integration Safety**: Allowing other contracts and dApps to interact safely
 
-Remember: In traditional software, bugs are embarrassing and costly. In smart contracts, bugs can be catastrophic and permanent. The extra effort in comprehensive testing pays for itself many times over through avoided security incidents and user trust.
+## Conclusion
+
+Remember: In traditional software, bugs are embarrassing and costly. In smart contracts, bugs can be catastrophic and can be permanent if upgrade is not compatible. The extra effort in comprehensive testing pays for itself many times over through avoided security incidents and user trust.
 
 This testing framework provides a solid foundation for ensuring your smart contract behaves correctly under all conditions, protecting both your users and your protocol's reputation.
+
+Next Tutorial: [Frontend Integration Guide](./building_the_document_management_interface)

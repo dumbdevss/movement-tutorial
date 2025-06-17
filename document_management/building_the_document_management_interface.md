@@ -573,12 +573,6 @@ const handleSignDocument = async () => {
 };
 ```
 
-**Understanding Gas Limits:**
-
-- **Gas**: The computational cost of executing blockchain transactions
-- **max_gas_amount**: Sets a limit on how much gas we're willing to pay
-- **Why Set Limits**: Prevents runaway costs if something goes wrong
-
 **The Signature Field:**
 While blockchain wallets provide cryptographic signatures automatically, we collect a "display signature" (like a name or initials) for human-readable identification in the UI.
 
@@ -684,7 +678,6 @@ Update the UI to handle different document list states:
 
 **Card-Based Layout:**
 Using consistent Card components creates a professional appearance and ensures proper spacing and visual hierarchy across all states.
-
 
 ## Conclusion
 
