@@ -20,6 +20,7 @@ The complete implementation of this smart contract demonstrates advanced Move pa
 ### The Cliff Period Explained
 
 A **cliff period** is an initial waiting period where no tokens can be claimed, even if some time has passed. For example:
+
 - 4-year vesting with 1-year cliff means no tokens for first year
 - After cliff, tokens vest normally over remaining period
 - Protects against short-term participants
@@ -27,6 +28,7 @@ A **cliff period** is an initial waiting period where no tokens can be claimed, 
 ### Why Resource Accounts for Vesting?
 
 Resource accounts are perfect for vesting contracts because:
+
 - They hold the actual tokens being vested
 - Provide deterministic addresses for fund management
 - Enable programmatic token distribution
@@ -36,6 +38,7 @@ Resource accounts are perfect for vesting contracts because:
 ### Event-Driven Vesting Architecture
 
 Events are crucial for vesting systems because:
+
 - Beneficiaries need notifications when tokens become available
 - Compliance requires audit trails of all token movements
 - Analytics track vesting progress across all streams
@@ -62,12 +65,14 @@ const ERROR_INVALID_STREAM_IDS: u64 = 11;
 **Why These Constants Matter:**
 
 The `SEED` constant ensures our resource account has a **deterministic address** for token custody. This predictability is crucial for:
+
 - Frontend integration knowing where to check balances
 - Multi-deployment consistency across networks
 - Simplified address management for administrators
 
 **Comprehensive Error Handling:**
 The extensive error codes provide specific feedback for different failure scenarios:
+
 - **Ownership errors**: Unauthorized actions
 - **Stream management**: Duplicate or missing streams
 - **Validation errors**: Invalid parameters
@@ -75,6 +80,7 @@ The extensive error codes provide specific feedback for different failure scenar
 - **Batch operation errors**: Input validation for multiple streams
 
 **Implementation steps:**
+
 1. Define `SEED` for deterministic resource account creation
 2. Create specific error codes for each failure scenario
 3. Use descriptive names that clearly indicate the error condition
@@ -93,6 +99,7 @@ struct StreamCreatedEvent has drop, store {
 
 **Event Design for Vesting:**
 This event captures all essential information for external systems:
+
 - **beneficiary**: Who will receive the tokens
 - **total_amount**: Complete allocation (for planning and compliance)
 - **start_time**: When vesting begins (crucial for calculations)
@@ -101,12 +108,14 @@ This event captures all essential information for external systems:
 
 **Why This Data Structure:**
 External systems (HR platforms, tax software, beneficiary dashboards) need this information to:
+
 - Send notifications to beneficiaries
 - Calculate future vesting schedules
 - Generate compliance reports
 - Plan cash flow and token distribution
 
 **Implementation steps:**
+
 1. Include `#[event]` annotation above the struct (if using newer Move versions)
 2. Add `drop` and `store` abilities for event handling
 3. Include all critical vesting parameters for external system integration
@@ -123,6 +132,7 @@ struct ClaimCreatedEvent has drop, store {
 
 **Claim Event Purpose:**
 This event tracks actual token distributions and is essential for:
+
 - **Tax reporting**: Each claim is a taxable event
 - **Compliance**: Regulatory reporting of token movements
 - **Analytics**: Understanding claim patterns and timing
@@ -130,11 +140,13 @@ This event tracks actual token distributions and is essential for:
 
 **Minimal but Complete Design:**
 We include only essential claim information:
+
 - **beneficiary**: Who claimed (for accounting)
 - **amount**: How much was claimed (for records)
 - **timestamp**: When it happened (for compliance and tax purposes)
 
 **Implementation steps:**
+
 1. Create a lightweight event struct for claim tracking
 2. Focus on essential information needed for compliance and notifications
 3. Ensure timestamp precision for accurate reporting
@@ -838,6 +850,7 @@ Events enable reactive vesting systems:
 ### 4. **Flexible Claiming Model**
 
 Partial claiming provides benefits:
+
 - **Cash flow management**: Beneficiaries control timing
 - **Tax optimization**: Strategic claim timing for tax efficiency
 - **Risk management**: Gradual token realization
@@ -846,31 +859,8 @@ Partial claiming provides benefits:
 ### 5. **Comprehensive Validation Strategy**
 
 Multi-layer validation ensures:
+
 - **Data integrity**: Consistent system state
 - **Business logic**: Proper vesting rules enforcement
 - **Security**: Authorization and access control
 - **User experience**: Clear error messages
-
-## Security Considerations
-
-### Access Control
-- **Owner-only functions**: Stream creation and treasury management
-- **Beneficiary-only claims**: Only stream recipients can claim
-- **Stream-specific validation**: Proper authorization for each operation
-
-### Financial Security
-- **Fund custody**: Resource account holds all vesting tokens
-- **Atomic operations**: All-or-nothing token transfers
-- **Balance verification**: Sufficient funds before operations
-- **Overflow protection**: Safe arithmetic operations
-
-### Data Integrity
-- **Dual storage sync**: Consistent state across storage structures
-- **Immutable streams**: Core parameters cannot be changed after creation
-- **Audit trails**: Complete history of all operations
-
-## Economic Design
-
-### Vesting Mechanics
-- **Linear vesting**: Predictable, time-based token
-- 

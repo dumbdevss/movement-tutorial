@@ -22,7 +22,8 @@ Before diving into the implementation, ensure you have the following prerequisit
 - **[Scaffold-Move](https://github.com/arjanjohan/scaffold-move)**: Development framework that streamlines building Move applications
 - **[Aptos SDK](https://aptos.dev/en/build/sdks/ts-sdk)**: For interacting with the Movement testnet and managing blockchain operations
 - **[Node.js](https://nodejs.org/en/download/)**: Required for running Next.js and related frontend dependencies (version 16 or later recommended)
-- **[IPFS/Pinata](https://www.pinata.cloud/)**: For decentralized storage of NFT metadata and content
+- **[IPFS/Pinata](https://www.pinata.cloud/)**: For decentralized storage of document content
+  - **Quick Setup**: Create a free account at [pinata.cloud](https://www.pinata.cloud/) and obtain your API key from the [API Keys section](https://app.pinata.cloud/keys) in your dashboard
 - An **IDE**: Use VS Code or IntelliJ IDEA for writing and debugging code
 - **Basic familiarity with [Move](https://developer.movementnetwork.xyz/learning-paths/basic-concepts)**: A foundational understanding of the Move programming language
 - **Familiarity with [Scaffold-Move Hooks](https://scaffold-move-docs.vercel.app/hooks/)**: Understanding how to use the custom hooks for blockchain interactions

@@ -1,37 +1,41 @@
 # NFT Marketplace Smart Contract Tutorial - Implementation Guide
 
-This guide walks through each TODO item in the NFT Marketplace smart contract with clear explanations and implementation details. Follow these steps to complete your Move module implementation.
+This guide provides a detailed walkthrough of implementing an NFT Marketplace smart contract on the Aptos blockchain, with explanations of why each component is necessary and how it contributes to the system.
 
 ## Introduction
 
-This tutorial will guide you through implementing a full-featured NFT Marketplace on the Aptos blockchain. The marketplace will support:
+This tutorial guides you through building a feature-rich NFT Marketplace on the Movement blockchain, enabling:
 
 - Creating and minting NFTs
 - Listing NFTs for fixed-price sales
-- Auction-style sales with bidding functionality
+- Conducting auction-style sales with bidding
 - Transferring NFT ownership
 - Managing collections and NFT metadata
 
+The marketplace leverages resource accounts and object model for secure and scalable operations. Resource accounts and signer capabilities ensure secure management of shared state, while tables and vectors optimize data storage and retrieval.
+
 ## TODO 1: Set Constants
 
-First, let's define the constants that will be used throughout the contract:
+Define constants to ensure consistent configuration across the contract:
 
 ```move
 // Constants
 const SEED: vector<u8> = b"marketplace_funds";
-const MARKETPLACE_FEE_PERCENT: u64 = 5; // represent in 100%
-const CANCEL_FEE_PERCENT: u64 = 45; // represented as 45/1000 for precision (4.5%)
+const MARKETPLACE_FEE_PERCENT: u64 = 5; // 5% fee
+const CANCEL_FEE_PERCENT: u64 = 45; // 4.5% fee (45/1000 for precision)
 ```
 
-**Implementation details:**
+**Why we need constants**: Constants centralize configuration values, making the contract easier to maintain and modify. They prevent hardcoding values throughout the code, reducing errors and improving readability.
 
-- `SEED` is used to create a deterministic resource account for the marketplace
-- `MARKETPLACE_FEE_PERCENT` defines the marketplace's fee for sales (5%)
-- `CANCEL_FEE_PERCENT` defines the fee for canceling auctions with active bids (4.5%, represented as 45/1000 for precision)
+**Why these specific constants**:
+
+- `SEED`: A unique byte string used to generate a deterministic address for the resource account, ensuring predictable account creation for storing funds and data securely.
+- `MARKETPLACE_FEE_PERCENT`: Sets a 5% fee on sales to sustain the marketplace's operations, ensuring economic viability.
+- `CANCEL_FEE_PERCENT`: Applies a 4.5% fee (represented as 45/1000 for precision) when canceling auctions with active bids to discourage malicious cancellations and protect bidders.
 
 ## TODO 2: Define Error Codes
 
-Error codes help provide meaningful error messages when operations fail:
+Error codes provide clear feedback for failed operations:
 
 ```move
 // Error codes
@@ -52,14 +56,13 @@ const E_INVALID_SALE_TYPE: u64 = 309;
 const E_NO_SIGNER_CAP: u64 = 310;
 ```
 
-**Implementation details:**
+**Why we need error codes**: In Move, error codes are essential for secure and user-friendly error handling. They allow the contract to specify why a transaction failed, aiding debugging and providing clear feedback to users.
 
-- These error codes help identify specific failure scenarios
-- Numbered ranges help categorize errors by type (e.g., ownership, sale, auction)
+**Why specific error codes**: Each code corresponds to a unique failure scenario (e.g., `E_NOT_OWNER` for unauthorized access). Organized in ranges (e.g., 100s for ownership issues, 300s for general errors), they make error categorization intuitive and help developers quickly identify issues.
 
 ## TODO 3: Define the Offer Data Structure
 
-The Offer structure represents a bid in an auction:
+The `Offer` structure represents a bid in an auction:
 
 ```move
 struct Offer has store, drop, copy {
@@ -69,16 +72,18 @@ struct Offer has store, drop, copy {
 }
 ```
 
-**Implementation details:**
+**Why we need the Offer structure**: It tracks bids in auctions, enabling the marketplace to record and compare offers efficiently. Using a vector to store offers allows iteration over all bids to find the highest or refund bidders.
 
-- `bidder`: Address of the user making the offer
-- `amount`: The bid amount in AptosCoin
-- `timestamp`: When the offer was placed
-- The structure has `store`, `drop`, and `copy` abilities for flexibility
+**Why these fields and abilities**:
+
+- `bidder`: Stores the bidder’s address for identification and fund transfers.
+- `amount`: Records the bid amount in AptosCoin for comparison.
+- `timestamp`: Captures when the bid was placed, useful for auditing or resolving disputes.
+- **Abilities**: `store` allows storage in global state, `drop` permits discarding unused offers, and `copy` enables duplication for processing without modifying the original.
 
 ## TODO 4: Define the Auction Data Structure
 
-The Auction structure tracks auction-specific data:
+The `Auction` structure manages auction-specific data:
 
 ```move
 struct Auction has store, drop {
@@ -89,16 +94,18 @@ struct Auction has store, drop {
 }
 ```
 
-**Implementation details:**
+**Why we need the Auction structure**: It encapsulates all data needed to run an auction, ensuring organized tracking of bids and deadlines. Storing offers in a vector allows efficient iteration to process bids or refund them when needed.
 
-- `deadline`: Optional timestamp when the auction ends
-- `offers`: Vector containing all offers made for the auction
-- `highest_bid`: Current highest bid amount
-- `highest_bidder`: Optional address of the current highest bidder
+**Why these fields**:
+
+- `deadline`: Optional timestamp for auction end, supporting timed or open-ended auctions.
+- `offers`: A vector of all bids for transparency and record-keeping, enabling iteration for processing.
+- `highest_bid`: Tracks the current highest bid for quick reference, avoiding repeated vector iteration.
+- `highest_bidder`: Stores the address of the highest bidder, if any, for efficient winner identification.
 
 ## TODO 5: Define the Collection Data Structure
 
-Collections group related NFTs:
+The `Collection` structure groups related NFTs:
 
 ```move
 struct Collection has copy, drop, store {
@@ -109,16 +116,18 @@ struct Collection has copy, drop, store {
 }
 ```
 
-**Implementation details:**
+**Why we need Collections**: Collections organize NFTs, establishing provenance and enabling creators to manage related assets under a unified brand, which is critical for user experience and discoverability.
 
-- `name`: Name of the collection
-- `description`: Description of the collection
-- `uri`: URI for collection metadata
-- `creator`: Address of the collection creator
+**Why these fields**:
+
+- `name`: Identifies the collection for user display.
+- `description`: Provides context or branding for the collection.
+- `uri`: Points to off-chain metadata (e.g., images or details) for rich presentation.
+- `creator`: Tracks the collection’s creator for attribution and access control.
 
 ## TODO 6: Define the NFT Data Structure
 
-The NFT structure contains all NFT-related data:
+The `NFT` structure holds all NFT-related data:
 
 ```move
 #[resource_group_member(group = aptos_framework::object::ObjectGroup)]
@@ -140,26 +149,21 @@ struct NFT has store, key {
 }
 ```
 
-**Implementation details:**
+**Why we need the NFT structure**: It centralizes all data for an NFT, enabling the marketplace to manage its state and interactions. Storing NFTs in a vector allows iteration for listing or filtering.
 
-- `id`: Unique identifier for the NFT
-- `owner`: Current owner's address
-- `creator`: Original creator's address
-- `created_at`: Timestamp of creation
-- `category`: Category of the NFT
-- `collection_name`: Name of the collection it belongs to
-- `name`: Name of the NFT
-- `description`: Description of the NFT
-- `uri`: URI for NFT metadata
-- `price`: Current price if for sale
-- `for_sale`: Whether the NFT is listed for sale
-- `sale_type`: Type of sale (instant or auction)
-- `auction`: Optional auction details
-- `token`: Reference to the underlying token object
+**Why these fields and abilities**:
+
+- `id`: Unique identifier for tracking within the marketplace.
+- `owner` and `creator`: Track ownership and origin for access control and provenance.
+- `created_at`: Records creation time for auditing.
+- `category`, `collection_name`, `name`, `description`, `uri`: Store metadata for user display and organization.
+- `price`, `for_sale`, `sale_type`, `auction`: Manage sale status and type (instant or auction).
+- `token`: Links to the Aptos token object for ecosystem compatibility.
+- **Abilities**: `store` enables global storage, `key` ensures unique identification for resource management.
 
 ## TODO 7: Define the History Data Structure
 
-The History structure tracks ownership transfers:
+The `History` structure tracks ownership transfers:
 
 ```move
 struct History has store, drop, copy {
@@ -170,19 +174,21 @@ struct History has store, drop, copy {
 }
 ```
 
-**Implementation details:**
+**Why we need History**: It provides a transparent record of NFT transfers, crucial for auditing and proving provenance, which builds trust in the marketplace.
 
-- `new_owner`: Address of the buyer/new owner
-- `seller`: Address of the seller
-- `amount`: Sale amount
-- `timestamp`: When the transfer occurred
+**Why these fields**:
+
+- `new_owner` and `seller`: Identify parties for clear transfer records.
+- `amount`: Records the sale amount for transparency.
+- `timestamp`: Marks when the transfer occurred for chronological tracking.
 
 ## TODO 8: Initialize the Marketplace
 
-Now let's initialize the marketplace with the necessary resources:
+Initialize the marketplace with necessary resources:
 
 ```move
 fun init_module(account: &signer) {
+    // This creates a resource signer and a signer cap
     let (resource_signer, signer_cap) = account::create_resource_account(account, SEED);
     coin::register<AptosCoin>(&resource_signer);
     move_to(&resource_signer, Marketplace {
@@ -197,17 +203,17 @@ fun init_module(account: &signer) {
 }
 ```
 
-**Implementation details:**
+**Why we need this function**: It sets up the marketplace’s core infrastructure, including a resource account to manage funds and state securely.
 
-- Creates a resource account with the provided SEED
-- Registers AptosCoin for the resource account
-- Initializes the Marketplace with an empty NFTs vector
-- Stores MarketplaceFunds with the signer capability
-- Initializes Collections with an empty collections vector
+**Why resource accounts and signer capability**:
+
+- **Resource Account**: A separate account created with `SEED` to hold shared state (e.g., NFTs, funds) and isolate marketplace operations from the deployer’s account, enhancing security.
+- **Signer Capability**: A secure token (`signer_cap`) that allows the marketplace to perform actions on behalf of the resource account, such as transferring funds, without exposing the resource account’s private key.
+- **Vectors**: Used for `nfts` and `collections` to enable dynamic storage and iteration over NFTs and collections, supporting scalable growth.
 
 ## TODO 9: Initialize a Collection
 
-Let's implement a function to initialize a new collection:
+Implement a function to create a new collection:
 
 ```move
 public entry fun initialize_collection(
@@ -240,17 +246,17 @@ public entry fun initialize_collection(
 }
 ```
 
-**Implementation details:**
+**Why we need this function**: It allows creators to define collections, which organize NFTs and establish their provenance, enhancing discoverability and branding.
 
-- Gets the resource account address
-- Retrieves a mutable reference to the Collections resource
-- Creates a new Collection struct with the provided details
-- Adds the collection to the collections vector
-- Creates an unlimited collection using the Aptos token framework
+**Why these components**:
+
+- **Resource Address**: Uses the deterministic address from `SEED` to access the `Collections` resource, ensuring consistent state management.
+- **Vector for Collections**: Stores collections in a vector for efficient iteration when displaying or filtering collections.
+- **Aptos Collection Framework**: Integrates with `collection::create_unlimited_collection` to ensure compatibility with Aptos’s token ecosystem.
 
 ## TODO 10: Mint an NFT
 
-Now let's implement the NFT minting function:
+Implement the NFT minting function:
 
 ```move
 public entry fun mint_nft(
@@ -335,20 +341,32 @@ public entry fun mint_nft(
 }
 ```
 
-**Implementation details:**
+**Why we need this function**: It enables creators to mint new NFTs, the core asset of the marketplace, and ensures they are properly integrated into collections and the Aptos token framework.
 
-- Gets the resource account address
-- Retrieves mutable references to Marketplace and Collections resources
-- Checks if the collection exists; if not, initializes it
-- Creates a named token using the Aptos token objects framework
-- Generates token signer and transfer reference
-- Creates an NFT struct with provided details
-- Adds the NFT to the marketplace's NFTs vector
-- Stores the PermissionRef with the transfer reference
+**Token Functions Used**:
+
+1. `token::create_named_token`: Creates a new NFT token within an existing collection
+    - Parameters: creator signer, collection name, description, token name, property version (optional), URI
+    - Returns: `ConstructorRef` for token setup
+
+2. `object::generate_signer`: Creates a token signer from a constructor reference and returns the signer
+    - Parameters: constructor_ref returned when from creating token
+  
+3. `object::generate_transfer_ref`: Create a transfer reference from a constructor reference and returns the transfer reference
+    - Parameters: constructor_ref returned when from creating token
+
+**Note:** Transfer reference is used to transfer token. It can also be used when try to disabe transfer of token
+
+**Why these components**:
+
+- **Collection Check**: Uses vector iteration to verify if the collection exists, ensuring NFTs are linked to valid collections.
+- **Resource Account**: Accesses `Marketplace` and `Collections` via the resource address for secure state management.
+- **Token Creation**: Leverages `token::create_named_token` for compatibility with Aptos’s object model.
+- **Signer and Transfer References**: `token_signer` and `transfer_ref` enable secure token management, with `PermissionRef` stored to control future transfers.
 
 ## TODO 11: List an NFT for Sale
 
-Let's implement the function to list an NFT for sale:
+Implement the function to list an NFT for sale:
 
 ```move
 public entry fun list_nft_for_sale(
@@ -385,19 +403,17 @@ public entry fun list_nft_for_sale(
 }
 ```
 
-**Implementation details:**
+**Why we need this function**: It allows owners to list NFTs for sale, supporting both instant and auction sales, which are core marketplace functionalities.
 
-- Gets the resource account address
-- Retrieves the NFT by ID from the marketplace
-- Verifies the caller is the NFT owner
-- Ensures the NFT is not already listed
-- Validates the sale type and auction deadline
-- Updates NFT fields: for_sale, sale_type, price
-- If listing as an auction, initializes the Auction struct
+**Why these components**:
+
+- **Resource Account**: Accesses the `Marketplace` resource to update NFT state securely.
+- **Vector Access**: Uses `vector::borrow_mut` to retrieve and modify the specific NFT by ID, leveraging vector’s indexing for efficiency.
+- **Auction Initialization**: Creates an `Auction` struct with an empty offers vector for new auctions, enabling bid tracking.
 
 ## TODO 12: Place an Offer for an Auction
 
-Now let's implement the function to place an offer in an auction:
+Implement the function to place a bid in an auction:
 
 ```move
 public entry fun place_offer(
@@ -452,21 +468,17 @@ public entry fun place_offer(
 }
 ```
 
-**Implementation details:**
+**Why we need this function**: It enables users to place bids in auctions, a key feature for dynamic pricing and competitive sales.
 
-- Verifies the NFT exists, is for sale, and is an auction
-- Checks that the auction hasn't ended
-- Ensures the offer amount is higher than the minimum price and current highest bid
-- Verifies the bidder has sufficient balance including fees
-- Gets the resource account signer
-- Refunds the previous highest bidder if exists
-- Transfers the bid amount to the resource account
-- Creates and stores the Offer struct
-- Updates the auction's highest bid and bidder
+**Why these components**:
+
+- **Resource Account and Signer Capability**: Uses `signer_cap` to securely transfer funds to the resource account, isolating bidder funds until the auction concludes.
+- **Vector for Offers**: Stores bids in the auction’s offers vector for iteration and tracking, ensuring all bids are recorded.
+- **Refund Logic**: Refunds the previous highest bidder with a cancellation fee to maintain fairness and deter manipulation.
 
 ## TODO 13: Finalize an Auction
 
-Let's implement the function to finalize an auction:
+Implement the function to finalize an auction:
 
 ```move
 public entry fun finalize_auction(
@@ -513,20 +525,17 @@ public entry fun finalize_auction(
 }
 ```
 
-**Implementation details:**
+**Why we need this function**: It finalizes auctions by transferring funds and NFTs to the appropriate parties, ensuring a secure and fair conclusion.
 
-- Verifies the NFT exists, owner is caller, is for sale, and is an auction
-- Checks the auction has ended if deadline exists
-- Gets the resource account signer
-- If there's a highest bidder:
-  - Transfers payment to seller
-  - Transfers NFT to winner
-  - Updates NFT owner
-- Updates NFT: clears sale status, price, and auction
+**Why these components**:
+
+- **Resource Account and Signer Capability**: Uses `signer_cap` to securely transfer funds from the resource account to the seller.
+- **PermissionRef**: Ensures only authorized transfers of the NFT using the stored transfer reference.
+- **Vector Access**: Retrieves the NFT via vector indexing for efficient state updates.
 
 ## TODO 14: Purchase an NFT (Instant Sale)
 
-Let's implement the function to purchase an NFT listed for instant sale:
+Implement the function to purchase an NFT listed for instant sale:
 
 ```move
 public entry fun purchase_nft(
@@ -570,19 +579,17 @@ public entry fun purchase_nft(
 }
 ```
 
-**Implementation details:**
+**Why we need this function**: It enables instant purchases, providing a straightforward buying option for users.
 
-- Verifies the NFT exists, is for sale, and is instant sale
-- Calculates fees and seller amount
-- Verifies buyer has sufficient balance
-- Gets the resource account address
-- Transfers payment to seller and fee to resource account
-- Transfers NFT to buyer
-- Updates NFT: owner, clears sale status, price, and auction
+**Why these components**:
+
+- **Resource Account**: Transfers fees to the resource account for secure fund management.
+- **PermissionRef**: Ensures secure NFT transfer using the stored transfer reference.
+- **Vector Access**: Retrieves the NFT efficiently via vector indexing.
 
 ## TODO 15: Transfer an NFT
 
-Let's implement the function to transfer an NFT:
+Implement the function to transfer an NFT:
 
 ```move
 public entry fun transfer_nft(
@@ -611,16 +618,16 @@ public entry fun transfer_nft(
 }
 ```
 
-**Implementation details:**
+**Why we need this function**: It allows owners to transfer NFTs without a sale, supporting gifting or private transfers.
 
-- Verifies the NFT exists and owner is caller
-- Ensures new owner is different from current owner
-- Transfers NFT to new owner
-- Updates NFT: owner, clears sale status, price, and auction
+**Why these components**:
+
+- **PermissionRef**: Ensures only the owner can authorize the transfer, maintaining security.
+- **Vector Access**: Retrieves the NFT efficiently for state updates.
 
 ## TODO 16: Cancel an NFT Listing
 
-Let's implement the function to cancel an NFT listing:
+Implement the function to cancel an NFT listing:
 
 ```move
 public entry fun cancel_listing(owner: &signer, nft_id: u64) acquires Marketplace, MarketplaceFunds {
@@ -656,14 +663,13 @@ public entry fun cancel_listing(owner: &signer, nft_id: u64) acquires Marketplac
 }
 ```
 
-**Implementation details:**
+**Why we need this function**: It allows owners to delist NFTs, providing flexibility while protecting bidders in auctions.
 
-- Verifies the NFT exists, owner is caller, and is for sale
-- If auction with a highest bidder:
-  - Calculates refund amount with cancellation fee
-  - Gets resource account signer
-  - Transfers refund to bidder
-- Updates NFT: clears sale status, price, and auction
+**Why these components**:
+
+- **Resource Account and Signer Capability**: Refunds bidders securely using the resource account’s funds.
+- **Vector Access**: Retrieves the NFT for state updates.
+- **Refund Logic**: Applies a cancellation fee to deter abuse while ensuring fairness.
 
 ## TODO 17: View Function - Get User Collections
 
@@ -690,13 +696,9 @@ public fun get_all_collections_by_user(account: address, limit: u64, offset: u64
 }
 ```
 
-**Implementation details:**
+**Why we need this function**: It allows users to view their collections, enhancing discoverability and user experience.
 
-- Gets the Collections resource
-- Creates an empty result vector
-- Iterates through collections within limit and offset
-- Filters collections by creator address
-- Returns the filtered collections
+**Why vector iteration**: Iterates over the `collections` vector to filter by creator, supporting pagination with `limit` and `offset` for scalability.
 
 ## TODO 18: View Function - Get All Collections
 
@@ -720,13 +722,9 @@ public fun get_all_collections(limit: u64, offset: u64): vector<Collection> acqu
 }
 ```
 
-**Implementation details:**
+**Why we need this function**: It provides a view of all collections, supporting marketplace browsing.
 
-- Gets the Collections resource
-- Creates an empty result vector
-- Iterates through collections within limit and offset
-- Adds each collection to the result
-- Returns the collections
+**Why vector iteration**: Uses vector iteration for efficient retrieval, with `limit` and `offset` for pagination.
 
 ## TODO 19: Get NFT By Collection and Token Name
 
@@ -754,12 +752,9 @@ public fun get_nft_by_collection_name_and_token_name(
 }
 ```
 
-**Implementation details:**
+**Why we need this function**: It enables precise lookup of an NFT by collection, name, and owner, useful for user interfaces and verification.
 
-- Gets the Marketplace resource
-- Iterates through all NFTs
-- Finds NFT matching collection name, token name, and owner
-- Returns the NFT if found, none otherwise
+**Why vector iteration**: Iterates over the `nfts` vector to find a matching NFT, as vectors are suitable for sequential searches in Move.
 
 ## TODO 20: Get User's NFTs
 
@@ -785,13 +780,9 @@ public fun get_user_nfts(
 }
 ```
 
-**Implementation details:**
+**Why we need this function**: It allows users to view their owned NFTs, a core feature for wallet functionality.
 
-- Gets the Marketplace resource
-- Creates an empty result vector
-- Iterates through all NFTs
-- Filters NFTs by owner address
-- Returns the filtered NFTs
+**Why vector iteration**: Filters NFTs by owner through vector iteration, ensuring all relevant NFTs are returned.
 
 ## TODO 21: Get NFTs For Sale
 
@@ -815,82 +806,28 @@ public fun get_nfts_for_sale(): vector<NFT> acquires Marketplace {
 }
 ```
 
-**Implementation details:**
+**Why we need this function**: It displays all NFTs available for sale, enabling marketplace browsing.
 
-- Gets the Marketplace resource
-- Creates an empty result vector
-- Iterates through all NFTs
-- Filters NFTs that are for sale
-- Returns the filtered NFTs
+**Why vector iteration**: Filters for-sale NFTs through vector iteration, suitable for dynamic listings.
 
 ## Key Implementation Considerations
 
-1. **Resource Account Pattern**: The marketplace uses a resource account to manage shared state and handle payments, which enhances security and simplifies fund management.
-
-2. **Dual Sale Types**: The contract supports both instant sales and auctions with a unified listing system.
-
-3. **Fee Management**: Marketplace fees are collected automatically for both sale types, and cancellation fees protect bidders from auction manipulation.
-
-4. **Object Model Integration**: The contract leverages Aptos's object model for token management, ensuring compatibility with the broader Aptos ecosystem.
-
-5. **Collection Management**: Collections provide a way to organize related NFTs and establish provenance.
-
-6. **Transfer Controls**: The PermissionRef pattern ensures that only authorized parties can transfer NFTs.
-
-## Testing Recommendations
-
-To ensure your NFT marketplace implementation works correctly and securely, follow these testing guidelines:
-
-1. **Test NFT Minting Process**
-   - Verify NFT creation
-   - Confirm proper token ownership assignment
-   - Check collection association
-
-2. **Verify Listing Functionality**
-   - Test listing NFTs with different price points
-   - Validate both instant sale and auction listing mechanisms
-   - Ensure only NFT owners can create listings
-
-3. **Test Auction Mechanics**
-   - Verify bid placement and proper recording of highest bids
-   - Test auction deadline enforcement
-   - Confirm automatic refunds to outbid participants
-   - Validate auction finalization with and without bids
-
-4. **Test Purchase Flows**
-   - Verify instant purchase works correctly
-   - Confirm proper fee collection (marketplace commission)
-   - Test ownership transfer upon successful purchase
-   - Ensure listing state is properly updated after purchase
-
-5. **Validate Cancellation Logic**
-   - Test listing cancellation for both sale types
-   - Verify refund mechanisms for auction participants
-   - Confirm proper state reset after cancellation
-
-6. **Security Testing**
-   - Attempt unauthorized operations (purchases, transfers, updates)
-   - Test with insufficient balance scenarios
-   - Verify deadline and timestamp-related security measures
-
-7. **View Function Accuracy**
-   - Test all view functions with various states of NFTs
-   - Verify correct filtering of user-owned and for-sale NFTs
-   - Confirm NFT details are accurately reported
-
-8. **Event Verification**
-   - Verify that all relevant events are emitted correctly
-   - Check event data for accuracy and completeness
+1. **Resource Account Pattern**: A separate account manages shared state and funds, using `signer_cap` to perform actions securely without exposing private keys, enhancing security.
+2. **Vectors for Iteration**: Used for `nfts`, `collections`, and `offers` to support dynamic storage and efficient iteration for filtering and processing.
+3. **Dual Sale Types**: Supports instant sales and auctions with a unified listing system for flexibility.
+4. **Fee Management**: Automatically collects fees for sustainability and applies cancellation fees to protect bidders.
+5. **Object Model Integration**: Uses Aptos’s object model for token management, ensuring ecosystem compatibility.
+6. **Collection Management**: Organizes NFTs for provenance and discoverability.
+7. **Transfer Controls**: `PermissionRef` ensures only authorized transfers, maintaining security.
 
 ## Conclusion
 
-Congratulations! You've successfully built a complete NFT marketplace on the Movement blockchain by:
+You’ve built a robust NFT marketplace on the Aptos blockchain, featuring:
 
-1. Implementing a robust Move smart contract with:
-   - NFT minting and management
-   - Dual-mode selling mechanisms (instant purchase and auctions)
-   - Secure ownership transfers and metadata management
-   - Marketplace fee collection for sustainability
+- Secure NFT minting and management
+- Dual-mode selling (instant and auctions)
+- Safe ownership transfers and metadata management
+- Sustainable fee collection
 
 ## Next Steps
 

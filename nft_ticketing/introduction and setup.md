@@ -6,13 +6,13 @@ description: "A practical guide to building an NFT ticketing platform on Movemen
 date: "2025-04-09"
 ---
 
-# Introduction
+## Introduction
 
 NFT ticketing represents a revolutionary approach to event management, offering enhanced security, programmable features, and new revenue opportunities that traditional ticketing systems cannot match. By leveraging blockchain technology, event organizers can create verifiable digital tickets that prevent counterfeiting, enable controlled transferability, and even generate secondary market royalties.
 
 In this guide, we'll walk you through building an NFT ticketing decentralized application (dApp) using the Move programming language on the Movement testnet. This dApp will allow event organizers to mint soul-bound and transferrable NFT tickets for events.
 
-# Prerequisites
+## Prerequisites
 
 Before diving into the implementation, ensure you have the following prerequisites set up:
 
@@ -34,12 +34,13 @@ The complete code for this guide is available on GitHub [here](https://github.co
 - Develop a responsive Next.js dashboard for users to purchase and manage tickets.
 - Deploy the NFT ticketing dApp to the Movement testnet with test cases using the Aptos SDK.
 
-# Setting up Development Environment
+## Setting up Development Environment
 
 To begin building our NFT ticketing dApp, we'll set up an isolated and efficient development environment using a pre-bootstrapped repository. Follow these steps to get started:
 
 1. **Clone the Repository**  
-   Clone the tutorial repository, which has been bootstrapped with `scaffold-move` for Movement development. The `main` branch is the default:  
+   Clone the tutorial repository, which has been bootstrapped with `scaffold-move` for Movement development. The `main` branch is the default:
+
    ```bash
    git clone https://github.com/dumbdevss/nft-ticketing
    cd nft-ticketing
@@ -47,6 +48,7 @@ To begin building our NFT ticketing dApp, we'll set up an isolated and efficient
 
 2. **Install Dependencies**
    Install the necessary project dependencies using Yarn:
+
     ```bash
    yarn install
    ```
@@ -67,24 +69,23 @@ To begin building our NFT ticketing dApp, we'll set up an isolated and efficient
    ```
 
    > **Note**: If you encounter an error, navigate to the `packages/move` directory and use `movement init` or `aptos init`, depending on the CLI installed.
+
    ```bash
       movement init --network custom --rest-url https://testnet.bardock.movementnetwork.xyz/v1 --faucet-url https://faucet.testnet.bardock.movementnetwork.xyz/
    ```
-
 
 ## Understanding the Project Structure
 
 The project is structured to clearly separate the smart contract logic from the user interface components. Here's a breakdown:
 
 - **`packages/move`**: This directory houses the Move smart contracts.
-    - **`sources`**: Contains the core Move modules that define the logic for creating and managing NFT tickets.
+  - **`sources`**: Contains the core Move modules that define the logic for creating and managing NFT tickets.
 
 - **`/frontend`**: This directory contains the Next.js application, which provides the user interface for interacting with the smart contracts.
-    - **`/components`**: Reusable React components used throughout the application.
-    - **`/app`**: Defines the application's routes and pages.
-    - **`/hooks/scaffold-move`**: Custom React hooks that facilitate interaction with the Movement blockchain, leveraging `scaffold-move`.
-    - **`/utils`**: Helper functions and utilities to support the frontend functionality.
-   
+  - **`/components`**: Reusable React components used throughout the application.
+  - **`/app`**: Defines the application's routes and pages.
+  - **`/hooks/scaffold-move`**: Custom React hooks that facilitate interaction with the Movement blockchain, leveraging `scaffold-move`.
+  - **`/utils`**: Helper functions and utilities to support the frontend functionality.
 
 This separation of concerns promotes a more maintainable and scalable codebase.
 

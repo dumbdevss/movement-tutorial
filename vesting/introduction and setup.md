@@ -1,90 +1,127 @@
+# Build a Token Vesting System on Movement
+
 ---
-title: "Build a Token Vesting dApp with Movement"
-description: "A practical guide to building a token vesting dApp on Movement's blockchain, enabling projects to create customizable vesting schedules for gradual token distribution to users."
-date: "2025-04-04"
+title: "Build a Token Vesting System on Movement"
+description: "A comprehensive guide to building a decentralized token vesting platform on Movement's blockchain, enabling secure token distribution with customizable vesting schedules, cliff periods, and multi-beneficiary support."
+date: "2025-06-22"
 ---
 
-# Introduction
-Token vesting is a powerful mechanism in the blockchain world, ensuring fair distribution and long-term commitment by locking tokens
-for a set period before they can be accessed. Whether you're building a project for a decentralized team, a startup, or a community,
-vesting helps align incentives and prevent premature sell-offs. In this tutorial, we’ll walk you through creating a token vesting
-decentralized application (dApp) using the Move programming language on the Movement testnet.
+## Introduction
 
-In this guide, we'll walk you through building a token vesting decentralized application (dApp) using the Move programming language on the Movement
-testnet. This dApp will enable projects to establish vesting schedules for team members, investors, and other stakeholders, ensuring a controlled and
-gradual token release based on predefined conditions.
+Token vesting is a crucial mechanism in blockchain ecosystems that enables controlled and scheduled token distribution over time. This system is particularly valuable for startups, DAOs, and projects that need to distribute tokens to team members, investors, or community members while preventing immediate sell-offs and ensuring long-term commitment.
 
+In this guide, we'll walk you through building a comprehensive token vesting decentralized application (dApp) using the Move programming language on the Movement testnet. This vesting contract will allow project owners to create customizable vesting streams with cliff periods, manage multiple beneficiaries simultaneously, and provide transparent tracking of vested and claimed tokens.
 
-# Prerequisites
+## Key Features
+
+Our vesting system includes the following powerful features:
+
+- **Flexible Vesting Schedules**: Create custom vesting periods with linear token release
+- **Cliff Periods**: Implement cliff mechanisms to prevent early token access
+- **Multi-Beneficiary Support**: Create multiple vesting streams in a single transaction
+- **Real-time Tracking**: Monitor vested amounts and claiming history
+- **Secure Access Control**: Owner-only functions for stream creation and fund management
+- **Event Logging**: Comprehensive event emission for transparency and monitoring
+- **Resource Account Architecture**: Secure fund management through Aptos resource accounts
+
+## Prerequisites
 
 Before diving into the implementation, ensure you have the following prerequisites set up:
 
-- **[Movement CLI](https://developer.movementnetwork.xyz/learning-paths/basic-concepts/01-install-movement-cli)**: Essential for interacting with the Movement blockchain.
-- **[Aptos CLI](https://aptos.dev/cli-tools/aptos-cli-tool/install-aptos-cli)**: Required for certain operations compatible with Movement.
-- **[Scaffold-Move](https://github.com/arjanjohan/scaffold-move)**: A development framework that streamlines building Move applications.
-- **[Aptos SDK](https://aptos.dev/en/build/sdks/ts-sdk)**: Set up the Aptos SDK for interacting with the Movement testnet and managing blockchain operations.
-- **[Node.js](https://nodejs.org/en/download/)**: Required for running Next.js and related frontend dependencies (version 16 or later recommended).
-- An **IDE**: Use an integrated development environment like **[VS Code](https://code.visualstudio.com/)** or **[IntelliJ IDEA](https://www.jetbrains.com/idea/)** for writing and debugging code.
-- **Basic familiarity with [Move](https://developer.movementnetwork.xyz/learning-paths/basic-concepts)**: A foundational understanding of the Move programming language is helpful.
-- **Familiarity with [Scaffold-Move Hooks](https://scaffold-move-docs.vercel.app/hooks/)**: Understanding how to use the custom hooks provided by Scaffold-Move for blockchain interactions.
-The complete code for this guide is available on GitHub [here](https://github.com/dumbdevss/vesting-tutorial).
+- **[Movement CLI](https://developer.movementnetwork.xyz/learning-paths/basic-concepts/01-install-movement-cli)**: Essential for interacting with the Movement blockchain
+- **[Aptos CLI](https://aptos.dev/cli-tools/aptos-cli-tool/install-aptos-cli)**: Required for certain operations compatible with Movement
+- **[Scaffold-Move](https://github.com/arjanjohan/scaffold-move)**: Development framework that streamlines building Move applications
+- **[Aptos SDK](https://aptos.dev/en/build/sdks/ts-sdk)**: For interacting with the Movement testnet and managing blockchain operations
+- **[Node.js](https://nodejs.org/en/download/)**: Required for running Next.js and related frontend dependencies (version 16 or later recommended)
+- An **IDE**: Use VS Code or IntelliJ IDEA for writing and debugging code
+- **Basic familiarity with [Move](https://developer.movementnetwork.xyz/learning-paths/basic-concepts)**: A foundational understanding of the Move programming language
+- **Understanding of Token Economics**: Basic knowledge of vesting mechanisms and tokenomics
+
+The complete code for this guide is available on GitHub [here](#) <!-- Replace with actual repository link -->
+
+## Use Cases
+
+This vesting system is ideal for various scenarios:
+
+- **Team Token Distribution**: Distribute tokens to team members with long-term vesting schedules
+- **Investor Relations**: Manage investor token allocations with appropriate cliff periods
+- **Community Incentives**: Create vesting programs for community contributors and early adopters
+- **DAO Treasury Management**: Implement structured token releases for DAO operations
+- **Partnership Agreements**: Manage token distributions for strategic partnerships
 
 ## TL;DR
 
-- Set up a Scaffold-Move project for streamlined Move development on the Movement testnet.
-- Write a Move module to create and manage time-based vesting schedules.
-- Develop a responsive Next.js dashboard for users to view and withdraw vested tokens.
-- Deploy the vesting dApp to the Movement testnet with test cases using the Aptos SDK.
+- Set up a Move development environment for building on the Movement testnet
+- Implement a comprehensive vesting contract with cliff periods and multi-beneficiary support
+- Deploy and test the vesting system with built-in test cases
+- Create a user-friendly interface for managing vesting streams and token claims
+- Understand resource account architecture for secure fund management
 
-# Setting up Development Environment
+## Architecture Overview
 
-To begin building our Token Vesting dApp, we'll set up an isolated and efficient development environment using a pre-bootstrapped repository. Follow these steps to get started:
+Our vesting system uses a resource account architecture that provides several security and operational benefits:
 
-1. **Clone the Repository**  
-   Clone the tutorial repository, which has been bootstrapped with `scaffold-move` for Movement development. The `main` branch is the default:  
-   ```bash
-   git clone https://github.com/dumbdevss/vesting-tutorial
-   cd vesting-tutorial
-   ```
+- **Resource Account**: A separate account that holds all vested tokens, controlled by the main contract
+- **Stream Management**: Individual vesting streams with unique identifiers and customizable parameters
+- **Access Control**: Owner-only functions for critical operations like stream creation and fund deposits
+- **Event System**: Comprehensive logging for all vesting operations and claims
 
-2. **Install Dependencies**
-   Install the necessary project dependencies using Yarn:
-    ```bash
-   yarn install
-   ```
+## Setting up Development Environment
 
-3. **Generate a Deployment Account**
+To begin building our token vesting system, we'll set up an efficient development environment:
 
-   Create a local account for interacting with the Movement testnet:
+1. **Initialize Movement Project**
+   Create a new Movement project for our vesting contract:
 
    ```bash
-   yarn account
+   movement init vesting-contract --network testnet
+   cd vesting-contract
    ```
 
-   After initialization, note the generated account address and update the `Move.toml` file:
+2. **Configure Move.toml**
+   Update your `Move.toml` file with the necessary dependencies:
 
    ```toml
+   [package]
+   name = "vesting-contract"
+   version = "1.0.0"
+   authors = ["Your Name <your.email@example.com>"]
+
    [addresses]
-   blockchain = "<your_generated_account_address>"
+   blockchain = "_" # Will be replaced with your account address
+
+   [dependencies]
+   AptosFramework = { git = "https://github.com/aptos-labs/aptos-core.git", subdir = "aptos-move/framework/aptos-framework", rev = "mainnet" }
    ```
 
-   > **Note**: If you encounter an error, navigate to the `packages/move` directory and use `movement init` or `aptos init`, depending on the CLI installed.
+3. **Generate Deployment Account**
+   Create and fund an account for deployment:
 
-## Understanding the Project Structure
+   ```bash
+   movement account create --account-name main
+   movement account fund-with-faucet --account-name main
+   ```
 
-The project is structured to clearly separate the smart contract logic from the user interface components. Here's a breakdown:
+4. **Update Configuration**
+   Replace the placeholder address in `Move.toml` with your generated account address.
 
-- **`packages/move`**: This directory houses the Move smart contracts.
-    - **`sources`**: Contains the core Move modules that define the logic for creating and managing NFT tickets.
+## Understanding the Contract Structure
 
-- **`/frontend`**: This directory contains the Next.js application, which provides the user interface for interacting with the smart contracts.
-    - **`/components`**: Reusable React components used throughout the application.
-    - **`/app`**: Defines the application's routes and pages.
-    - **`/hooks/scaffold-move`**: Custom React hooks that facilitate interaction with the Movement blockchain, leveraging `scaffold-move`.
-    - **`/utils`**: Helper functions and utilities to support the frontend functionality.
+Our vesting contract consists of several key components:
 
-This separation of concerns promotes a more maintainable and scalable codebase.
+- **VestingStream**: Individual vesting configurations with beneficiary details, amounts, and timing
+- **VestingContract**: Main contract resource that manages all streams and permissions
+- **State**: Resource account management and event handling
+- **Access Control**: Owner-only functions for critical operations
+- **View Functions**: Public functions for querying vesting information
 
-## Next Steps: Developing the Vesting Smart Contract
+## Next Steps: Implementing the Smart Contract
 
-Now that we've set up our development environment and understood the project structure, let's move on to developing the core smart contract for our Token Vesting solution. In the following section, we'll write the Move code that will power our decentralized vesting platform, enabling projects to create customizable vesting schedules for gradual token distribution.
+With our development environment configured, we'll next dive into the implementation details of our vesting contract. In the following sections, we'll cover:
+
+- **Core Contract Logic**: Implementing stream creation, token claiming, and access control
+- **Testing Framework**: Comprehensive test cases to ensure contract security and functionality
+- **Deployment Process**: Steps to deploy your vesting contract to the Movement testnet
+- **Frontend Integration**: Building a user interface for interacting with the vesting system
+
+This guide will provide you with a production-ready token vesting system that can be customized for your specific project needs while maintaining the highest security standards.

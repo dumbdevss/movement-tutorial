@@ -20,12 +20,7 @@ The complete implementation of the frontend interface can be found in the reposi
 **Repository:** [dumbdevss/document-management](https://github.com/dumbdevss/document-management)  
 **Branch:** `frontend-integration`
 
-You can view or clone the finished code to compare against your implementation as you follow along with this guide. The frontend code includes:
-
-- React components for document management 
-- Integration with Move smart contracts using Scaffold hooks
-- IPFS integration for file storage
-- Complete styling using Tailwind CSS
+You can view or clone the finished code to compare against your implementation as you follow along with this guide
 
 ## Document Creation Page (/app/create-document)
 
