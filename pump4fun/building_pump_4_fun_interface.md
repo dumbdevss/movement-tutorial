@@ -2,34 +2,47 @@
 
 ## Introduction
 
-This tutorial guides you through implementing the frontend interface for PumpFun, a decentralized token creation and swapping platform on the Aptos blockchain. We'll work through all TODOs systematically to build a fully functional React/Next.js application with token creation, swapping, and holder viewing capabilities.
+This tutorial guides you through implementing the frontend interface for PumpFun, a decentralized token creation and swapping platform on the Movement blockchain. We'll work through all TODOs systematically to build a fully functional interface with token creation, swapping, and holder viewing capabilities
 
-## Prerequisites
+## Source Code Reference
 
-- Node.js (v16+), React, Next.js, TypeScript
-- Apollo Client for GraphQL queries
-- Pinata IPFS API keys for image storage
-- Aptos Wallet Adapter
-- Environment variables in `.env`:
+The complete implementation of the frontend interface can be found in the repository:
 
-```env
-NEXT_PUBLIC_PINATA_API_KEY=your_api_key
-NEXT_PUBLIC_PINATA_API_SECRET=your_api_secret
-NEXT_PUBLIC_PINATA_GATEWAY=https://gateway.pinata.cloud
-```
+**Repository:** [dumbdevss/pump-fun](https://github.com/dumbdevss/pump-fun)  
+**Branch:** `frontend-integration`
 
-## TODO 1: Component Structure Setup
+## TODO 1: Setup Pinata and Pinata API key
 
-First, ensure your component files are properly structured:
+1. **Create Pinata Account**
+   - Go to [pinata.cloud](https://www.pinata.cloud/)
+   - Sign up for free account
 
-- `token-creator.tsx` - Token creation form
-- `token-holders.tsx` - Display token holders
-- `token-swap-all.tsx` - Token swapping interface
-- `page.tsx` - Main application page
+2. **Get API Keys**
+   - Login → Go to "API Keys" section
+   - Click "New Key"
+   - Copy your API Key and API Secret
+
+3. **Setup Environment Variables**
+   - Create `.env.local` in your project root:
+  
+   ```bash
+   NEXT_PUBLIC_PINATA_API_KEY=your_api_key_here
+   NEXT_PUBLIC_PINATA_API_SECRET=your_secret_here
+   NEXT_PUBLIC_PINATA_GATEWAY=https://gateway.pinata.cloud/ipfs/
+   ```
+
+4. **Update Your Code**
+
+   ```javascript
+   // Replace the empty strings with:
+   const PINATA_API_KEY = process.env.NEXT_PUBLIC_PINATA_API_KEY
+   const PINATA_API_SECRET = process.env.NEXT_PUBLIC_PINATA_API_SECRET
+   const PINATA_GATEWAY = process.env.NEXT_PUBLIC_PINATA_GATEWAY || "https://gateway.pinata.cloud/ipfs/"
+   ```
 
 ## TODO 2: Implement HandleChange in TokenCreator
 
-In `token-creator.tsx`, implement the form input handler:
+Navigate `token-creator.tsx`, implement the form input handler:
 
 ```tsx
 const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -134,30 +147,48 @@ const closeModal = () => {
 Connect form handlers to JSX elements:
 
 ```tsx
-// Form onSubmit
+// TODO 6: Connect form onSubmit handler
 <form onSubmit={handleSubmit}>
 
-// Input onChange handlers
+TODO 7: Connect name input onChange
 <input name="name" onChange={handleChange} />
+
+// TODO 8: Connect symbol input onChange
 <input name="symbol" onChange={handleChange} />
+
+// TODO 9: Connect projectUrl input onChange
 <input name="projectUrl" onChange={handleChange} />
+
+// TODO 10: Connect description textarea onChange
 <textarea name="description" onChange={handleChange} />
+
+// TODO 11: Connect twitter input onChange
 <input name="twitter" onChange={handleChange} />
+
+// TODO 12: Connect discord input onChange
 <input name="discord" onChange={handleChange} />
+
+// TODO 13: Connect telegram input onChange
 <input name="telegram" onChange={handleChange} />
+
+// TODO 14: Connect supply input onChange
 <input name="supply" onChange={handleChange} />
+
+// TODO 15: Connect initialLiquidity input onChange
 <input name="initialLiquidity" onChange={handleChange} />
 
-// Image input
+// TODO 16: Connect image input onChange
 <input type="file" onChange={handleImageChange} />
 
-// Success modal close button
+// TODO 17: Connect success modal close button
 <button onClick={closeModal}>Close</button>
+
+</form>
 ```
 
 ## TODO 18: Define GraphQL Query in TokenHolders
 
-In `token-holders.tsx`, define the query:
+In `/component/token-holders.tsx`, define the query:
 
 ```tsx
 const GET_TOKEN_HOLDERS = gql`
@@ -182,9 +213,9 @@ Fetch token holders data:
 
 ```tsx
 const { loading, error, data } = useQuery(GET_TOKEN_HOLDERS, {
-  variables: { assetType: tokenAddress },
-  skip: !tokenAddress,
-})
+    variables: { assetType: tokenAddress },
+    skip: !tokenAddress, // Skip the query if no token address is provided
+  })
 ```
 
 ## TODO 20: Process Token Holders Data
@@ -192,12 +223,12 @@ const { loading, error, data } = useQuery(GET_TOKEN_HOLDERS, {
 Map query response to component format:
 
 ```tsx
-const holders = data?.current_fungible_asset_balances?.map((holder: any, index: number) => ({
-  id: index,
-  address: holder.owner_address,
-  amount: parseInt(holder.amount),
-  timestamp: holder.last_transaction_timestamp,
-})) || []
+ const holders = data?.current_fungible_asset_balances?.map((holder: any, index: number) => ({
+    id: index,
+    address: holder.owner_address,
+    amount: parseInt(holder.amount),
+    timestamp: holder.last_transaction_timestamp,
+  })) || []
 ```
 
 ## TODO 21: Calculate Total Supply
@@ -210,18 +241,24 @@ const totalSupply = holders.reduce((sum: number, holder: any) => sum + holder.am
 
 ## TODO 22: Define GraphQL Query in TokenSwapAll
 
-In `token-swap-all.tsx`, define user balance query:
+In `/component/token-swap-all.tsx`, define user balance query:
 
 ```tsx
 const GET_USER_TOKEN_BALANCE = gql`
-  query GetUserTokenBalance($ownerAddress: String!, $assetType: String!) {
+  query GetUserTokenBalance($owner_address: String!, $asset_type: String!) {
     current_fungible_asset_balances(
-      where: {owner_address: {_eq: $ownerAddress}, asset_type: {_eq: $assetType}}
+      where: {
+        owner_address: {_eq: $owner_address},
+        asset_type: {_eq: $asset_type}
+      }
     ) {
+      asset_type
       amount
+      last_transaction_timestampAdd commentMore actions
     }
   }
-`
+`;
+
 ```
 
 ## TODO 23: Implement UseQuery Hook in TokenSwapAll
@@ -229,13 +266,14 @@ const GET_USER_TOKEN_BALANCE = gql`
 Fetch user token balance:
 
 ```tsx
-const { data: tokenBalanceData, loading: tokenBalanceLoading, refetch: refetchTokenBalance } = useQuery(
-  GET_USER_TOKEN_BALANCE,
-  {
-    variables: { ownerAddress: account?.address, assetType: currentTokenAddress },
+  const { data: tokenBalanceData, loading: tokenBalanceLoading, refetch: refetchTokenBalance } = useQuery(GET_USER_TOKEN_BALANCE, {
+    variables: {
+      owner_address: account?.address || "",
+      asset_type: currentTokenAddress
+    },
     skip: !account?.address || !currentTokenAddress,
-  }
-)
+    fetchPolicy: "network-only"
+  });
 ```
 
 ## TODO 24: Implement HandleSwap in TokenSwapAll
@@ -244,27 +282,30 @@ Handle token swapping logic:
 
 ```tsx
 const handleSwap = async () => {
-  if (!fromAmount || parseFloat(fromAmount) <= 0) return
-  
-  setIsLoading(true)
-  try {
-    const amount = parseFloat(fromAmount) * 1e8 // Convert to blockchain precision
-    
-    if (fromToken === "MOVE") {
-      await swapMoveToToken(currentTokenAddress, amount)
-    } else {
-      await swapTokensToMove(currentTokenAddress, amount)
+    if (!fromAmount || parseFloat(fromAmount) <= 0) return;
+
+    setIsLoading(true);
+    try {
+      const amount = parseFloat(fromAmount);
+
+      if (fromToken === "MOVE") {
+        // Swapping MOVE to token
+        await swapMoveToToken(currentTokenAddress, (amount * 1e8));
+      } else {
+        // Swapping token to MOVE
+        await swapTokensToMove(currentTokenAddress, (amount * 1e8));
+      }
+
+      // Clear form and refetch balances
+      setFromAmount("");
+      setToAmount("");
+      refetchTokenBalance();
+    } catch (error) {
+      console.error("Swap failed:", error);
+    } finally {
+      setIsLoading(false);
     }
-    
-    setFromAmount("")
-    setToAmount("")
-    refetchTokenBalance()
-  } catch (error) {
-    console.error("Error swapping tokens:", error)
-  } finally {
-    setIsLoading(false)
-  }
-}
+  };
 ```
 
 ## TODO 25: Connect Swap Button in TokenSwapAll
@@ -272,20 +313,20 @@ const handleSwap = async () => {
 Connect the swap button to handleSwap:
 
 ```tsx
-<Button
-  onClick={handleSwap}
-  disabled={!fromAmount || isLoading || parseFloat(fromAmount) <= 0}
-  className="w-full bg-gradient-to-r from-purple-500 to-pink-500"
->
-  {isLoading ? (
-    <>
-      <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-      Swapping...
-    </>
-  ) : (
-    "Swap Tokens"
-  )}
-</Button>
+  <Button
+            onClick={handleSwap}
+            disabled={!fromAmount || isLoading || parseFloat(fromAmount) <= 0}
+            className="w-full bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600"
+          >
+            {isLoading ? (
+              <>
+                <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                Swapping...
+              </>
+            ) : (
+              "Swap Tokens"
+            )}
+          </Button>
 ```
 
 ## TODO 26: Implement UseView Hook for Tokens in Page
@@ -293,10 +334,13 @@ Connect the swap button to handleSwap:
 In `page.tsx`, fetch all tokens:
 
 ```tsx
-const {
-  data: tokensData,
-  refetch: refreshTokensData,
-} = useView("get_all_tokens", {})
+  const {
+    data: tokensData,
+    refetch: refreshTokensData,
+  } = useView({
+    moduleName: "pump_for_fun",
+    functionName: "get_all_tokens",
+  })
 ```
 
 ## TODO 27: Implement UseView Hook for History in Page
@@ -304,10 +348,13 @@ const {
 Fetch transaction history:
 
 ```tsx
-const {
-  data: allHistoryData,
-  refetch: refreshAllHistoryData,
-} = useView("get_all_history", {})
+  const {
+    data: allHistoryData,
+    refetch: refreshAllHistoryData,
+  } = useView({
+    moduleName: "pump_for_fun",
+    functionName: "getAllHistory",
+  })
 ```
 
 ## TODO 28: Implement CreateToken Function in Page
@@ -315,49 +362,42 @@ const {
 Handle token creation transaction:
 
 ```tsx
-const createToken = async (
-  tokenName: string,
-  tokenSymbol: string,
-  icon_uri: string,
-  project_uri: string,
-  initial_liquidity: number,
-  supply: string,
-  description: string,
-  telegram: string | null,
-  twitter: string | null,
-  discord: string | null
-) => {
-  if (!account) {
-    toast({ title: "Error", description: "Please connect your wallet", variant: "destructive" })
-    return null
+  const createToken = async (tokenName: string, tokenSymbol: string, icon_uri: string, project_uri: string, initial_liquidity: number, supply: string, description: string, telegram: string | null, twitter: string | null, discord: string | null) => {
+    if (!account) {
+      toast({
+        title: "Please connect your wallet",
+        description: "You need to connect your wallet to create a token",
+        variant: "destructive",
+      })
+      return null
+    }
+    try {
+      const response = await submitTransaction("create_token", [tokenName, tokenSymbol, parseInt(supply), description, telegram, twitter, discord, icon_uri, project_uri, initial_liquidity]);
+
+      if (response as any) {
+        toast({
+          title: "Token created successfully",
+          description: `You have successfully created the token ${tokenName} (${tokenSymbol})`,
+          variant: "default",
+        })
+        refreshTokensData()
+        return response;
+      } else {
+        toast({
+          title: "Token creation failed",
+          description: `There was an error creating the token ${tokenName} (${tokenSymbol})`,
+          variant: "destructive",
+        })
+        return null;
+      }
+    } catch (error: any) {
+      toast({
+        title: "Token creation failed",
+        description: `There was an error creating the token ${tokenName} (${tokenSymbol}): ${error.message}`,
+        variant: "destructive",
+      })
+    }
   }
-  
-  try {
-    const response = await submitTransaction({
-      function: "create_token",
-      arguments: [
-        tokenName,
-        tokenSymbol,
-        icon_uri,
-        project_uri,
-        initial_liquidity,
-        supply,
-        description,
-        telegram,
-        twitter,
-        discord,
-      ],
-    })
-    
-    toast({ title: "Success", description: "Token created successfully!" })
-    refreshTokensData()
-    return response
-  } catch (error) {
-    console.error("Error creating token:", error)
-    toast({ title: "Error", description: "Failed to create token", variant: "destructive" })
-    return null
-  }
-}
 ```
 
 ## TODO 29: Implement SwapTokensToMove Function in Page
@@ -365,25 +405,39 @@ const createToken = async (
 Handle token to MOVE swapping:
 
 ```tsx
-const swapTokensToMove = async (token_addr: string, token_amount: number) => {
-  if (!account) {
-    toast({ title: "Error", description: "Please connect your wallet", variant: "destructive" })
-    return
+ const swapTokensToMove = async (token_addr: string, token_amount: number) => {
+    if (!account) {
+      toast({
+        title: "Please connect your wallet",
+        description: "You need to connect your wallet to swap tokens",
+        variant: "destructive",
+      })
+      return
+    }
+    try {
+      const response = await submitTransaction("swap_token_to_move", [token_addr as `0x${string}`, token_amount]);
+      if (response as any) {
+        toast({
+          title: "Swap successful",
+          description: `You have successfully swapped tokens to MOVE`,
+          variant: "default",
+        })
+        refreshTokensData()
+      } else {
+        toast({
+          title: "Swap failed",
+          description: `There was an error swapping tokens`,
+          variant: "destructive",
+        })
+      }
+    } catch (error: any) {
+      toast({
+        title: "Swap failed",
+        description: `There was an error swapping tokens: ${error.message}`,
+        variant: "destructive",
+      })
+    }
   }
-  
-  try {
-    await submitTransaction({
-      function: "swap_tokens_to_move",
-      arguments: [token_addr, token_amount],
-    })
-    
-    toast({ title: "Success", description: "Swap completed successfully!" })
-    refreshTokensData()
-  } catch (error) {
-    console.error("Error swapping tokens:", error)
-    toast({ title: "Error", description: "Failed to swap tokens", variant: "destructive" })
-  }
-}
 ```
 
 ## TODO 30: Implement SwapMoveToToken Function in Page
@@ -392,24 +446,39 @@ Handle MOVE to token swapping:
 
 ```tsx
 const swapMoveToToken = async (token_addr: string, move_amount: number) => {
-  if (!account) {
-    toast({ title: "Error", description: "Please connect your wallet", variant: "destructive" })
-    return
+    if (!account) {
+      toast({
+        title: "Please connect your wallet",
+        description: "You need to connect your wallet to swap tokens",
+        variant: "destructive",
+      })
+      return
+    }
+    try {
+      const response = await submitTransaction("swap_move_to_token", [token_addr as `0x${string}`, move_amount]);
+
+      if (response as any) {
+        toast({
+          title: "Swap successful",
+          description: `You have successfully swapped MOVE to tokens`,
+          variant: "default",
+        })
+        refreshTokensData()
+      } else {
+        toast({
+          title: "Swap failed",
+          description: `There was an error swapping tokens`,
+          variant: "destructive",
+        })
+      }
+    } catch (error: any) {
+      toast({
+        title: "Swap failed",
+        description: `There was an error swapping tokens: ${error.message}`,
+        variant: "destructive",
+      })
+    }
   }
-  
-  try {
-    await submitTransaction({
-      function: "swap_move_to_token",
-      arguments: [token_addr, move_amount],
-    })
-    
-    toast({ title: "Success", description: "Swap completed successfully!" })
-    refreshTokensData()
-  } catch (error) {
-    console.error("Error swapping tokens:", error)
-    toast({ title: "Error", description: "Failed to swap tokens", variant: "destructive" })
-  }
-}
 ```
 
 ## TODO 31: Implement HandleTokenClick Function in Page
@@ -427,17 +496,34 @@ const handleTokenClick = (token: Token) => {
 Connect TokenCard components to handleTokenClick:
 
 ```tsx
-{refinedTokenData.map((token, index) => (
-  <motion.div
-    key={token.id}
-    initial={{ opacity: 0, y: 20 }}
-    animate={{ opacity: 1, y: 0 }}
-    transition={{ delay: index * 0.1 }}
-    onClick={() => handleTokenClick(token)}
-  >
-    <TokenCard token={token} />
-  </motion.div>
-))}
+// TODO 32: 
+       {filteredTokens.map((token, index) => (
+                  <motion.div
+                    key={token.id}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: index * 0.1 }}
+                    onClick={() => handleTokenClick(token)}
+                  >
+                    <TokenCard token={token} />
+                  </motion.div>
+                ))}
+
+                //TODO 33:
+                  {filteredTokens
+                  .sort((a, b) => b.timestamp - a.timestamp)
+                  .slice(0, 6)
+                  .map((token, index) => (
+                    <motion.div
+                      key={token.id}
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: index * 0.1 }}
+                      onClick={() => handleTokenClick(token)}
+                    >
+                      <TokenCard token={token} />
+                    </motion.div>
+                  ))}
 ```
 
 ## TODO 34-35: Connect TokenSwapAll Props in Page
@@ -470,24 +556,32 @@ Pass swap functions to TokenSwap in the modal:
 Pass createToken function to TokenCreator:
 
 ```tsx
-<TokenCreator 
-  onClose={() => setShowCreateModal(false)} 
-  createToken={createToken} 
-/>
+  <TokenCreator
+   onClose={() => setShowCreateModal(false)}
+   createToken={createToken}
+  />
 ```
 
-## Testing & Deployment
+## Testing the Application
 
-1. **Run locally**: `npm run dev`
-2. **Test features**:
-   - Create tokens with images
-   - View token holders
-   - Swap MOVE ↔ tokens
-   - Verify modals and animations
+### 1. Running the Application Locally
 
-3. **Deploy**:
-   - Build: `npm run build`
-   - Deploy to Vercel: `vercel --prod`
+Start the development server:
+
+```bash
+npm run dev
+```
+
+This will launch the frontend at [http://localhost:3000](http://localhost:3000).
+
+### 2. Testing Features
+
+- **Connect Wallet**: Ensure wallet connection works and displays the correct address.
+- **Create Tokens**: Test creating tokens with and without images. Verify that new tokens appear in the token list.
+- **View Token Holders**: Select a token and check that the holders list displays correct addresses and balances.
+- **Swap MOVE ↔ Tokens**: Test swapping MOVE to tokens and vice versa. Confirm balances update accordingly.
+- **Modals and Animations**: Open and close modals (e.g., token creation, swap, details) and verify smooth animations.
+- **Error Handling**: Simulate errors (e.g., invalid input, failed transaction, upload issues) and check for appropriate user feedback.
 
 ## Key Notes
 

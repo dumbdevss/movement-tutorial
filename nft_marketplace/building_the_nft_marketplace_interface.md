@@ -1,14 +1,14 @@
 # Building the Frontend for Your NFT Marketplace
 
-This guide provides a structured walkthrough for building the frontend of an NFT marketplace, integrating a React-based interface with a Move smart contract on the Aptos blockchain. It covers NFT image storage using IPFS via Pinata, enabling users to upload images, create or select collections, and mint NFTs. Each implementation step is explained, with reasons for the chosen approaches where necessary, following the provided TODOs.
+This guide provides a structured walkthrough for building the frontend of an NFT marketplace, integrating a React-based interface with a Move smart contract on the Movement blockchain. It covers NFT image storage using IPFS via Pinata, enabling users to upload images, create or select collections, and mint NFTs. Each implementation step is explained, with reasons for the chosen approaches where necessary, following the provided TODOs.
 
 ## Understanding the Architecture
 
-The NFT marketplace frontend enables users to interact with a Move smart contract on the Aptos blockchain to create, browse, and manage NFTs. The interface is built with React (Next.js), styled with Tailwind CSS, and uses Scaffold-Move hooks for blockchain interactions and Pinata for IPFS storage.
+The NFT marketplace frontend enables users to interact with a Move smart contract on the Movement blockchain to create, browse, and manage NFTs. The interface is built with React (Next.js), styled with Tailwind CSS, and uses Scaffold-Move hooks for blockchain interactions and Pinata for IPFS storage.
 
 **Tech Stack:**
 
-- **Move Smart Contract**: Handles NFT creation, collection management, and ownership on Aptos.
+- **Move Smart Contract**: Handles NFT creation, collection management, and ownership on Movement.
 - **IPFS (via Pinata)**: Stores NFT images off-chain, with IPFS hashes stored on-chain for cost efficiency.
 - **React Frontend**: Built with Next.js and Tailwind CSS for a responsive, user-friendly interface.
 - **Scaffold Hooks**: Simplifies blockchain interactions with `useView` and `useSubmitTransaction`.
@@ -31,8 +31,6 @@ Storing large image files on-chain is cost-prohibitive due to high gas fees. IPF
 - **Pinata Integration**: Pinata pins files to ensure persistent availability, simplifying IPFS management.
 
 This approach balances blockchain immutability (storing hashes) with off-chain scalability (storing images).
-
----
 
 ## CreateNFT Page Implementation (`/app/create-nft`)
 
@@ -1047,6 +1045,34 @@ const getNftStatusBadge = (nft: NFT) => {
 
 - **Purpose**: Submits the listing transaction with input validation.
 - **Why Dynamic Text?**: Clarifies the action (sale or auction) and shows progress.
+  
+## Testing the Application
+
+### 1. Running the Application Locally
+
+Start the development server:
+
+```bash
+npm run dev
+```
+
+This will launch the frontend at [http://localhost:3000](http://localhost:3000).
+
+### 2. Testing Features
+
+- **Connect Wallet**: Ensure wallet connection works and displays the correct address.
+- **Upload and Mint NFTs**: Upload NFT images, mint new NFTs, and create/select collections.
+- **Marketplace**: Browse, filter, and sort NFTs. Test purchasing, bidding, transferring, and resolving auctions.
+- **Portfolio**: List NFTs for sale, cancel listings, and verify owned NFTs and collections.
+- **Transaction Feedback**: Confirm that loading indicators, error messages, and toasts appear appropriately. Ensure all buttons are disabled during ongoing transactions or uploads.
+
+### 3. Error Handling
+
+- Simulate errors (e.g., invalid addresses, failed transactions) and verify that user feedback is clear and actionable.
+
+### 4. Blockchain Verification
+
+- Use the Movement explorer to verify transaction hashes and NFT state changes after each action.
 
 ---
 
@@ -1069,7 +1095,7 @@ const getNftStatusBadge = (nft: NFT) => {
 
 ## Key Takeaways
 
-- **Blockchain Integration**: Scaffold hooks simplify Aptos blockchain interactions, reducing complexity.
+- **Blockchain Integration**: Scaffold hooks simplify Movement blockchain interactions, reducing complexity.
 - **IPFS Storage**: Pinata and IPFS enable cost-effective, decentralized file storage.
 - **User Experience**: Conditional rendering, loading states, and toasts ensure a professional interface.
 - **Security**: Environment variables and wallet authentication protect sensitive data and transactions.

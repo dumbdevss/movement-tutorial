@@ -374,6 +374,26 @@ Connect the transfer button to the `handleTransfer` function:
 - Disables the button when no recipient address is entered.
 - Triggers the transfer process on click.
 
+## Testing the Application
+
+### 1. Running the Application Locally
+
+Start the development server:
+
+```bash
+npm run dev
+```
+
+This will launch the frontend at [http://localhost:3000](http://localhost:3000).
+
+### 2. Testing Features
+
+- **Connect Wallet**: Ensure wallet connection works and displays the correct address.
+- **Purchase Ticket**: Buy both transferrable and soulbound tickets; verify transactions and QR code generation.
+- **Dashboard**: Check that purchased tickets appear with correct event details.
+- **Transfer Ticket**: For transferrable tickets, test sending to another wallet address.
+- **Error Handling**: Simulate errors (e.g., invalid address, failed transaction) and verify user feedback.
+
 ## Best Practices Implemented
 
 - **Error Handling**: Toast notifications provide feedback for successful and failed transactions (e.g., in `handleBuyTicket` and `handleTransfer`).
