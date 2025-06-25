@@ -873,4 +873,3 @@ Multi-layer validation ensures:
 
 ### Vesting Mechanics
 - **Linear vesting**: Predictable, time-based token
-- 
