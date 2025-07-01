@@ -58,16 +58,16 @@ const TICKET_PRICE: u64 = 50000000; // 0.5 MOVE (50,000,000 microMOVE)
 - **SEED**: Ensures deterministic resource account creation for consistent deployment
 - **TICKET_PRICE**: Set in microMOVE (1 MOVE = 100,000,000 microMOVE) for precise pricing
 
-## TODO 2: Define Error Codes
+## Step 2: Define Error Codes
 
 ```move
 // Error codes for comprehensive error handling
-const E_NOT_AUTHORIZED: u64 = 1001;
-const E_TICKET_USED: u64 = 1002;
-const E_TICKET_NOT_FOUND: u64 = 1003;
-const E_TICKET_LIMIT_REACHED: u64 = 1004;
-const E_ACCOUNT_DOES_NOT_EXIST: u64 = 1005;
-const E_INSUFFICIENT_FUNDS: u64 = 1006;
+const E_NOT_AUTHORIZED: u64 = 1;
+const E_TICKET_USED: u64 = 2;
+const E_TICKET_NOT_FOUND: u64 = 3;
+const E_TICKET_LIMIT_REACHED: u64 = 4;
+const E_ACCOUNT_DOES_NOT_EXIST: u64 = 5;
+const E_INSUFFICIENT_FUNDS: u64 = 6;
 ```
 
 **Error Code Strategy:**
@@ -89,13 +89,12 @@ Each error provides specific information about what went wrong:
 
 ```move
 struct TicketState has key {
-    admin: address,                                    // System administrator
-    ticket_counter: u64,                              // Total tickets minted
-    max_tickets: u64,                                 // Maximum tickets allowed
-    token_addresses: Table<u64, Object<Token>>,       // Maps ticket_id to token object
-    mint_events: EventHandle<TicketMintEvent>,        // Mint event tracking
-    transfer_events: EventHandle<TicketTransferEvent>, // Transfer event tracking
-    validation_events: EventHandle<TicketValidationEvent>, // Validation event tracking
+    admin: address,
+    ticket_counter: u64,
+    max_tickets: u64,
+    mint_events: EventHandle<TicketMintEvent>,
+    transfer_events: EventHandle<TicketTransferEvent>,
+    validation_events: EventHandle<TicketValidationEvent>,
 }
 ```
 
@@ -106,9 +105,8 @@ The `key` ability makes this a **global resource** - exactly one instance exists
 **Field Explanations:**
 
 - **admin**: The system administrator who can perform privileged operations
-- **ticket_counter**: Provides analytics and can prevent spam by limiting ticket creation rates
+- **ticket_counter**: Tracks total tickets minted and provides unique IDs
 - **max_tickets**: Implements artificial scarcity or practical limits
-- **token_addresses**: Maps sequential ticket IDs to actual NFT token objects for efficient lookup
 - **Event Handles**: Enable off-chain systems to track all ticket activities
 
 **Why Use Table for Token Storage?**
@@ -197,21 +195,21 @@ This compiler directive:
 fun init_module(admin: &signer) {
     let admin_addr = signer::address_of(admin);
 
-    // Create resource account for ticket management
+    // Create resource account
     let (resource_signer, signer_cap) = account::create_resource_account(admin, SEED);
-    let resource_addr = signer::address_of(&resource_signer);
 
-    // Register the resource account to receive APT payments
-    if (!coin::is_account_registered<AptosCoin>(resource_addr)) {
-        coin::register<AptosCoin>(&resource_signer);
+    // Register accounts to receive APT
+    if (!coin::is_account_registered<AptosCoin>(admin_addr)) {
+        coin::register<AptosCoin>(admin);
     };
+    coin::register<AptosCoin>(&resource_signer);
 
-    // Create the NFT collection under the resource account
+    // Create the collection under the resource account
     collection::create_unlimited_collection(
         &resource_signer,
         string::utf8(COLLECTION_DESCRIPTION),
         string::utf8(COLLECTION_NAME),
-        option::none(), // No maximum supply
+        option::none(),
         string::utf8(COLLECTION_URI),
     );
 
@@ -219,11 +217,15 @@ fun init_module(admin: &signer) {
     move_to(&resource_signer, TicketState {
         admin: admin_addr,
         ticket_counter: 0,
-        max_tickets: 1000000, // Set reasonable limit
-        token_addresses: table::new(),
+        max_tickets: 1000,
         mint_events: account::new_event_handle<TicketMintEvent>(&resource_signer),
         transfer_events: account::new_event_handle<TicketTransferEvent>(&resource_signer),
         validation_events: account::new_event_handle<TicketValidationEvent>(&resource_signer),
+    });
+
+    // Initialize TicketStore under the resource account
+    move_to(&resource_signer, TicketStore {
+        token_addresses: table::new(),
     });
 
     // Store the SignerCapability under the admin's address
@@ -234,12 +236,13 @@ fun init_module(admin: &signer) {
 ```
 
 **The Module Initialization Pattern:**
-`init_module` executes exactly once when the module is first deployed. This is the perfect place to:
+`init_module` executes exactly once when the module is first deployed. This function:
 
-- Set up the resource account infrastructure
-- Create the NFT collection
-- Initialize system state
-- Establish administrative controls
+1. **Creates Resource Account**: Generates a deterministic address controlled by our module
+2. **Registers for Payments**: Enables both admin and resource accounts to receive APT tokens
+3. **Creates Collection**: Establishes the NFT collection that will contain all tickets
+4. **Initializes State**: Sets up global state with empty collections and event handles
+5. **Stores Capabilities**: Gives the admin control over the resource account
 
 **Resource Account Setup Process:**
 
@@ -273,50 +276,47 @@ public entry fun mint_soulbound_ticket(
     metadata_hash: String,
     token_name: String,
     token_uri: String
-) acquires TicketState, ResourceAccountCap {
+) acquires TicketState, ResourceAccountCap, TicketStore {
     let user_addr = signer::address_of(user);
-
-    // Get the resource account address and state
     let resource_address = get_resource_address(@ticket_nft);
     let state = borrow_global_mut<TicketState>(resource_address);
-
-    // Validate system limits
     assert_ticket_limit_not_reached(state);
 
-    // Handle payment - check balance and collect fee
+    // Handle payment
     assert_user_has_enough_apt(user_addr, TICKET_PRICE);
     let payment = coin::withdraw<AptosCoin>(user, TICKET_PRICE);
     coin::deposit<AptosCoin>(resource_address, payment);
 
-    // Get the new ticket ID and verify user account exists
-    let new_ticket_id = state.ticket_counter + 1;
-    assert!(account::exists_at(user_addr), error::not_found(E_ACCOUNT_DOES_NOT_EXIST));
+    let ticket_id = state.ticket_counter;
+
+    // Verify account exists
+    if (!account::exists_at(user_addr)) {
+        abort E_ACCOUNT_DOES_NOT_EXIST
+    };
 
     // Mint the NFT under the resource account
     let resource_signer = get_resource_signer();
     let constructor_ref = token::create(
         &resource_signer,
         string::utf8(COLLECTION_NAME),
-        string::utf8(b"Soulbound Movement Ticket"),
+        string::utf8(b"Soulbound Event Ticket"),
         token_name,
         option::none(),
         token_uri,
     );
 
-    // Get the token object and transfer references
-    let token_object = object::object_from_constructor_ref<Token>(&constructor_ref);
+    // Get the token object and signer
+    let token_obj = object::object_from_constructor_ref<Token>(&constructor_ref);
+    let token_signer = object::generate_signer(&constructor_ref);
+
+    // Make it soulbound
     let transfer_ref = object::generate_transfer_ref(&constructor_ref);
-
-    // Make the token soulbound by disabling ungated transfers
-    object::disable_ungated_transfer(&transfer_ref);
-
-    // Transfer the token to the user
     let linear_transfer_ref = object::generate_linear_transfer_ref(&transfer_ref);
     object::transfer_with_ref(linear_transfer_ref, user_addr);
+    object::disable_ungated_transfer(&transfer_ref);
 
-    // Create and store ticket information
     let ticket_info = TicketInfo {
-        ticket_id: new_ticket_id,
+        ticket_id,
         metadata_hash,
         event_id,
         is_used: false,
@@ -327,21 +327,21 @@ public entry fun mint_soulbound_ticket(
     };
 
     // Store TicketInfo at the token's address
-    move_to(&object::generate_signer(&constructor_ref), ticket_info);
+    move_to(&token_signer, ticket_info);
 
-    // Store token address in state for lookup
-    table::add(&mut state.token_addresses, new_ticket_id, token_object);
+    // Store token address in TicketStore
+    let ticket_store = borrow_global_mut<TicketStore>(resource_address);
+    table::add(&mut ticket_store.token_addresses, ticket_id, token_obj);
 
-    // Emit mint event for off-chain tracking
+    // Emit mint event
     event::emit_event(&mut state.mint_events, TicketMintEvent {
-        ticket_id: new_ticket_id,
+        ticket_id,
         owner: user_addr,
         event_id,
         is_soulbound: true,
     });
 
-    // Update ticket counter
-    state.ticket_counter = new_ticket_id;
+    state.ticket_counter = state.ticket_counter + 1;
 }
 ```
 
@@ -378,7 +378,7 @@ The key difference in soulbound tokens is the call to `object::disable_ungated_t
 4. Make token soulbound by disabling transfers
 5. Transfer token to user
 6. Store comprehensive ticket information
-7. Update system state and emit events
+7. Update ticket store and emit events
 
 ## TODO 8: Implement the mint_transferable_ticket Function
 
@@ -389,72 +389,71 @@ public entry fun mint_transferable_ticket(
     metadata_hash: String,
     token_name: String,
     token_uri: String
-) acquires TicketState, ResourceAccountCap {
+) acquires TicketState, ResourceAccountCap, TicketStore {
     let user_addr = signer::address_of(user);
-
-    // Get the resource account address and state
     let resource_address = get_resource_address(@ticket_nft);
     let state = borrow_global_mut<TicketState>(resource_address);
-
-    // Validate system limits
     assert_ticket_limit_not_reached(state);
 
-    // Handle payment - check balance and collect fee
+    // Handle payment
     assert_user_has_enough_apt(user_addr, TICKET_PRICE);
     let payment = coin::withdraw<AptosCoin>(user, TICKET_PRICE);
     coin::deposit<AptosCoin>(resource_address, payment);
 
-    // Get the new ticket ID and verify user account exists
-    let new_ticket_id = state.ticket_counter + 1;
-    assert!(account::exists_at(user_addr), error::not_found(E_ACCOUNT_DOES_NOT_EXIST));
+    let ticket_id = state.ticket_counter;
+
+    // Verify account exists
+    if (!account::exists_at(user_addr)) {
+        abort E_ACCOUNT_DOES_NOT_EXIST
+    };
 
     // Mint the NFT under the resource account
     let resource_signer = get_resource_signer();
     let constructor_ref = token::create(
         &resource_signer,
         string::utf8(COLLECTION_NAME),
-        string::utf8(b"Transferable Movement Ticket"),
+        string::utf8(b"Transferable Event Ticket"),
         token_name,
         option::none(),
         token_uri,
     );
 
-    // Get the token object and transfer to user
-    let token_object = object::object_from_constructor_ref<Token>(&constructor_ref);
+    // Get the token object and signer
+    let token_obj = object::object_from_constructor_ref<Token>(&constructor_ref);
+    let token_signer = object::generate_signer(&constructor_ref);
+
+    // Keep it transferable - DO NOT disable transfers
     let transfer_ref = object::generate_transfer_ref(&constructor_ref);
     let linear_transfer_ref = object::generate_linear_transfer_ref(&transfer_ref);
     object::transfer_with_ref(linear_transfer_ref, user_addr);
 
-    // Note: We DO NOT disable transfers - this keeps the token transferable
-
-    // Create and store ticket information
     let ticket_info = TicketInfo {
-        ticket_id: new_ticket_id,
+        ticket_id,
         metadata_hash,
         event_id,
         is_used: false,
         owner: user_addr,
-        is_soulbound: false, // Transferable tickets are not soulbound
+        is_soulbound: false,
         purchase_time: timestamp::now_seconds(),
         usage_time: 0,
     };
 
     // Store TicketInfo at the token's address
-    move_to(&object::generate_signer(&constructor_ref), ticket_info);
+    move_to(&token_signer, ticket_info);
 
-    // Store token address in state for lookup
-    table::add(&mut state.token_addresses, new_ticket_id, token_object);
+    // Store token address in TicketStore
+    let ticket_store = borrow_global_mut<TicketStore>(resource_address);
+    table::add(&mut ticket_store.token_addresses, ticket_id, token_obj);
 
-    // Emit mint event for off-chain tracking
+    // Emit mint event
     event::emit_event(&mut state.mint_events, TicketMintEvent {
-        ticket_id: new_ticket_id,
+        ticket_id,
         owner: user_addr,
         event_id,
         is_soulbound: false,
     });
 
-    // Update ticket counter
-    state.ticket_counter = new_ticket_id;
+    state.ticket_counter = state.ticket_counter + 1;
 }
 ```
 
@@ -483,7 +482,7 @@ For transferable tickets, the transfer capability remains active, enabling:
 2. Create NFT with identical process
 3. Transfer to user WITHOUT disabling future transfers
 4. Store ticket information with `is_soulbound: false`
-5. Update system state and emit appropriate events
+5. Update ticket store and emit events
 
 ## TODO 9: Implement the transfer_ticket Function
 
@@ -495,27 +494,25 @@ public entry fun transfer_ticket(
 ) acquires TicketState, TicketInfo {
     let owner_addr = signer::address_of(owner);
 
-    // Verify the token exists and get TicketInfo
-    let token_addr = object::object_address(&token_address);
-    assert!(object::is_object(token_addr), error::not_found(E_TICKET_NOT_FOUND));
-    let ticket = borrow_global_mut<TicketInfo>(token_addr);
+    // Verify the token exists and borrow TicketInfo
+    let addr_token = object::object_address(&token_address);
+    assert!(object::is_object(addr_token), E_TICKET_NOT_FOUND);
+    let ticket = borrow_global_mut<TicketInfo>(addr_token);
 
-    // Perform comprehensive authorization and validation checks
+    // Perform validation checks
     assert_ticket_owner(ticket, owner_addr);
     assert_ticket_not_used(ticket);
     assert_ticket_transferable(ticket);
 
-    // Update the ticket owner in our records
+    // Update owner in our records
     ticket.owner = receiver;
 
     // Perform the actual NFT transfer
     object::transfer(owner, token_address, receiver);
 
-    // Get system state for event emission
+    // Emit transfer event
     let resource_address = get_resource_address(@ticket_nft);
     let state = borrow_global_mut<TicketState>(resource_address);
-
-    // Emit transfer event for tracking
     event::emit_event(&mut state.transfer_events, TicketTransferEvent {
         ticket_id: ticket.ticket_id,
         from: owner_addr,
@@ -571,27 +568,25 @@ public entry fun validate_ticket(
 ) acquires TicketInfo, TicketState {
     let user_addr = signer::address_of(user);
 
-    // Verify the token exists and get TicketInfo
-    let token_addr = object::object_address(&token_address);
-    assert!(object::is_object(token_addr), error::not_found(E_TICKET_NOT_FOUND));
-    let ticket = borrow_global_mut<TicketInfo>(token_addr);
+    // Verify the token exists and borrow TicketInfo
+    let addr_token = object::object_address(&token_address);
+    assert!(object::is_object(addr_token), E_TICKET_NOT_FOUND);
+    let ticket = borrow_global_mut<TicketInfo>(addr_token);
 
-    // Verify ownership and usage status
+    // Perform validation checks
     assert_ticket_owner(ticket, user_addr);
     assert_ticket_not_used(ticket);
 
-    // Mark ticket as used and record validation time
+    // Mark ticket as used
     ticket.is_used = true;
     ticket.usage_time = timestamp::now_seconds();
 
-    // Get system state for event emission
+    // Emit validation event
     let resource_address = get_resource_address(@ticket_nft);
     let state = borrow_global_mut<TicketState>(resource_address);
-
-    // Emit validation event for tracking and analytics
     event::emit_event(&mut state.validation_events, TicketValidationEvent {
         ticket_id: ticket.ticket_id,
-        owner: user_addr,
+        owner: ticket.owner,
     });
 }
 ```
@@ -708,17 +703,10 @@ While `coin::withdraw` would also fail with insufficient funds, checking first p
 ```move
 #[view]
 public fun get_ticket_status(token_address: Object<Token>): (bool, address, u64, String, bool) acquires TicketInfo {
-    let token_addr = object::object_address(&token_address);
-    assert!(object::is_object(token_addr), error::not_found(E_TICKET_NOT_FOUND));
-    
-    let ticket = borrow_global<TicketInfo>(token_addr);
-    (
-        ticket.is_used,
-        ticket.owner,
-        ticket.event_id,
-        ticket.metadata_hash,
-        ticket.is_soulbound
-    )
+    let addr_token = object::object_address(&token_address);
+    assert!(object::is_object(addr_token) && exists<TicketInfo>(addr_token), E_TICKET_NOT_FOUND);
+    let ticket = borrow_global<TicketInfo>(addr_token);
+    (ticket.is_used, ticket.owner, ticket.event_id, ticket.metadata_hash, ticket.is_soulbound)
 }
 ```
 
@@ -747,33 +735,31 @@ The function returns a carefully selected tuple containing:
 3. Access ticket information safely
 4. Return essential data as an efficiently-structured tuple
 
-
 ## TODO 15: Implement get_tickets_by_user View Function
 
 ```move
 #[view]
-public fun get_tickets_by_user(user_addr: address): vector<TicketInfo> acquires TicketState, TicketInfo {
+public fun get_tickets_by_user(user_addr: address): vector<TicketInfo> acquires TicketState, TicketStore, TicketInfo {
     let resource_address = get_resource_address(@ticket_nft);
     let state = borrow_global<TicketState>(resource_address);
+    let ticket_store = borrow_global<TicketStore>(resource_address);
     let user_tickets = vector::empty<TicketInfo>();
-    
+
     let i = 0;
-    let len = vector::length(&state.token_addresses);
-    
-    while (i < len) {
-        let token_address = *vector::borrow(&state.token_addresses, i);
-        let token_addr = object::object_address(&token_address);
-        
-        if (exists<TicketInfo>(token_addr)) {
-            let ticket = borrow_global<TicketInfo>(token_addr);
-            if (ticket.owner == user_addr) {
-                vector::push_back(&mut user_tickets, *ticket);
+    while (i < state.ticket_counter) {
+        if (table::contains(&ticket_store.token_addresses, i)) {
+            let token_obj = table::borrow(&ticket_store.token_addresses, i);
+            let ticket_addr = object::object_address(token_obj);
+            if (exists<TicketInfo>(ticket_addr)) {
+                let ticket = borrow_global<TicketInfo>(ticket_addr);
+                if (ticket.owner == user_addr) {
+                    vector::push_back(&mut user_tickets, *ticket);
+                };
             };
         };
-        
         i = i + 1;
     };
-    
+
     user_tickets
 }
 ```

@@ -1,10 +1,10 @@
-# Testing the NFT Marketplace Smart Contract
+# Testing the Vesting Smart Contract
 
-This section outlines a comprehensive testing strategy for the NFT Marketplace smart contract written in Move. The tests cover all critical functionalities, including module initialization, collection creation, NFT minting, listing, purchasing, auction management, transfers, and view functions. Each test ensures the contract behaves as expected under both success and failure conditions, adhering to the principles outlined in the provided document management system testing guide.
+This section outlines a comprehensive testing strategy for the `blockchain::vesting` smart contract written in Move. The tests cover all critical functionalities, including module initialization, depositing funds, creating single and multiple vesting streams, claiming vested tokens, and view functions. The approach follows the structure and best practices from the provided NFT Marketplace and Pump For Fun testing guides, ensuring robust validation of success and failure scenarios.
 
 ## 1. Test Environment Setup
 
-The test environment setup initializes the blockchain state, including timestamps, coin systems, and account balances, to simulate a realistic economic environment.
+The test environment initializes the blockchain state, including timestamps and the AptosCoin system, to simulate a realistic environment for vesting operations.
 
 ```move
 #[test_only]
@@ -13,975 +13,494 @@ fun setup_test(
     user1: &signer,
     user2: &signer,
 ) {
-    // Initialize timestamp system for auction deadlines
+    // Initialize timestamp for vesting schedules
     let aptos_framework = account::create_account_for_test(@aptos_framework);
     timestamp::set_time_has_started_for_testing(&aptos_framework);
 
-    // Initialize APT coin system for payments
+    // Initialize APT coin system for funding
     let (burn_cap, mint_cap) = aptos_coin::initialize_for_test(&aptos_framework);
     
-    // Fund test accounts with 100 APT (8 decimal places)
-    give_coins(&mint_cap, admin, 10000000000);
-    give_coins(&mint_cap, user1, 10000000000);
-    give_coins(&mint_cap, user2, 10000000000);
+    // Fund test accounts with 1 APT (100,000,000 octas)
+    give_coins(&mint_cap, admin, 100000000);
+    give_coins(&mint_cap, user1, 100000000);
+    give_coins(&mint_cap, user2, 100000000);
 
     // Clean up capabilities
     coin::destroy_burn_cap(burn_cap);
     coin::destroy_mint_cap(mint_cap);
 
-    // Initialize the marketplace module
+    // Initialize the vesting module
     init_module(admin);
 }
 ```
 
 **Why This Setup?**
 
-- **Timestamps**: Required for auction deadlines and history tracking.
-- **Coin System**: Ensures users can pay for NFTs and fees.
-- **Resource Account**: The marketplace uses a resource account to manage fees, which must be initialized and funded.
-- **Module Initialization**: Sets up the marketplace's global state, including empty NFT and collection vectors.
+- **Timestamps**: Essential for tracking vesting schedules, cliffs, and claim times.
+- **Coin System**: Ensures the admin can deposit APT and users can receive vested tokens.
+- **Module Initialization**: Sets up the `VestingContract` and `State` resources, including the resource account and event handles.
+- **Account Funding**: Provides sufficient APT for deposits and vesting stream creation.
 
 ## 2. Testing Module Initialization
 
-**Purpose**: Verify that the marketplace initializes correctly, creating necessary resources and registering for AptosCoin.
+**Purpose**: Verify that the module initializes correctly, creating the resource account, registering it for AptosCoin, and setting up the `VestingContract` and `State`.
 
 ```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-fun test_init_module(admin: &signer, user1: &signer, user2: &signer) {
+#[test(admin = @blockchain, user1 = @0x123, user2 = @0x456)]
+fun test_init_module(admin: &signer, user1: &signer, user2: &signer) acquires VestingContract, State {
     setup_test(admin, user1, user2);
-    let resource_addr = account::create_resource_address(&@marketplace, SEED);
+    let resource_addr = account::create_resource_address(&@blockchain, SEED);
     
     // Verify resource account and structures
-    assert!(exists<Marketplace>(resource_addr), E_NOT_INITIALIZED);
-    assert!(exists<MarketplaceFunds>(@marketplace), E_NO_SIGNER_CAP);
-    assert!(exists<Collections>(@marketplace), E_NOT_INITIALIZED);
+    assert!(exists<VestingContract>(resource_addr), 1000);
+    assert!(exists<State>(resource_addr), 1001);
+    assert!(coin::is_account_registered<AptosCoin>(resource_addr), 1002);
     
-    // Verify resource account is registered for APT
-    assert!(coin::is_account_registered<AptosCoin>(resource_addr), E_NOT_INITIALIZED);
+    let contract = borrow_global<VestingContract>(resource_addr);
+    assert!(contract.owner == resource_addr, 1003);
+    assert!(simple_map::length(&contract.streams) == 0, 1004);
+    assert!(vector::length(&contract.streams_vec) == 0, 1005);
+}
+```
+
+**Why This Matters**: Initialization errors could prevent the contract from managing funds or streams, breaking the vesting system.
+
+## 3. Testing Deposit
+
+### 3.1 Successful Deposit
+
+**Purpose**: Ensure the admin can deposit APT into the vesting contract.
+
+```move
+#[test(admin = @blockchain, user1 = @0x123, user2 = @0x456)]
+fun test_deposit_success(admin: &signer, user1: &signer, user2: &signer) acquires State {
+    setup_test(admin, user1, user2);
+    let amount = 1000000; // 0.01 APT
+    deposit(admin, amount);
     
-    // Verify initial state
-    let marketplace = borrow_global<Marketplace>(resource_addr);
-    assert!(vector::length(&marketplace.nfts) == 0, E_INVALID_STATE);
+    let resource_addr = account::create_resource_address(&@blockchain, SEED);
+    assert!(coin::balance<AptosCoin>(resource_addr) == amount, 2000);
 }
 ```
 
-**Why This Matters**: Initialization bugs could prevent the marketplace from functioning, as all operations rely on the resource account and global state.
+### 3.2 Error Cases for Deposit
 
-## 3. Testing Collection Initialization
-
-**Purpose**: Ensure collections are created correctly and stored in the global state.
+**Non-Owner Deposit**:
 
 ```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-fun test_initialize_collection(admin: &signer, user1: &signer, user2: &signer) acquires Collections {
-    setup_test(admin, user1, user2);
-    let creator_addr = signer::address_of(user1);
-    initialize_collection(
-        user1,
-        string::utf8(b"Test Collection"),
-        string::utf8(b"Test Description"),
-        string::utf8(b"https://test.com")
-    );
-
-    // Verify collection details
-    let collections = get_all_collections(10, 0);
-    assert!(vector::length(&collections) == 1, E_INVALID_STATE);
-    let collection = vector::borrow(&collections, 0);
-    assert!(collection.name == string::utf8(b"Test Collection"), E_INVALID_DATA);
-    assert!(collection.description == string::utf8(b"Test Description"), E_INVALID_DATA);
-    assert!(collection.uri == string::utf8(b"https://test.com"), E_INVALID_DATA);
-    assert!(collection.creator == creator_addr, E_NOT_AUTHORIZED);
+#[test(admin = @blockchain, user1 = @0x123)]
+#[expected_failure(abort_code = ERROR_NOT_OWNER)]
+fun test_deposit_not_owner(admin: &signer, user1: &signer) acquires State {
+    setup_test(admin, user1, user1);
+    deposit(user1, 1000000);
 }
 ```
 
-**Why This Matters**: Collections are the foundation for NFT organization. Incorrect initialization could lead to metadata errors or unauthorized access.
-
-## 4. Testing NFT Minting
-
-**Purpose**: Verify that NFTs are minted correctly, stored in the marketplace, and have proper initial state.
+**Zero Amount Deposit**:
 
 ```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-fun test_mint_nft(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections {
-    setup_test(admin, user1, user2);
-    let creator_addr = signer::address_of(user1);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-
-    // Verify NFT details
-    let nft = get_nft_details(0);
-    assert!(nft.id == 0, E_INVALID_DATA);
-    assert!(nft.owner == creator_addr, E_NOT_OWNER);
-    assert!(nft.creator == creator_addr, E_NOT_AUTHORIZED);
-    assert!(nft.collection_name == string::utf8(b"Test Collection"), E_INVALID_DATA);
-    assert!(nft.name == string::utf8(b"Test NFT"), E_INVALID_DATA);
-    assert!(nft.description == string::utf8(b"NFT Description"), E_INVALID_DATA);
-    assert!(nft.uri == string::utf8(b"https://nft.com"), E_INVALID_DATA);
-    assert!(nft.category == string::utf8(b"Art"), E_INVALID_DATA);
-    assert!(nft.price == 0, E_INVALID_STATE);
-    assert!(!nft.for_sale, E_INVALID_STATE);
-    assert!(nft.sale_type == SALE_TYPE_INSTANT, E_INVALID_SALE_TYPE);
-    assert!(option::is_none(&nft.auction), E_INVALID_STATE);
-    assert!(vector::length(&nft.history) == 0, E_INVALID_STATE);
+#[test(admin = @blockchain, user1 = @0x123)]
+#[expected_failure(abort_code = ERROR_INVALID_AMOUNT)]
+fun test_deposit_zero_amount(admin: &signer, user1: &signer) acquires State {
+    setup_test(admin, user1, user1);
+    deposit(admin, 0);
 }
 ```
 
-**Why This Matters**: Minting is the entry point for NFTs into the marketplace. Errors here could result in invalid tokens or ownership issues, breaking the entire system.
+**Why These Tests?**: Deposits fund the vesting contract. These tests ensure only the admin can deposit and that invalid amounts are rejected.
 
-## 5. Testing NFT Listing
+## 4. Testing Stream Creation
 
-### 5.1 Instant Sale Listing
+### 4.1 Successful Single Stream Creation
 
-**Purpose**: Verify that NFTs can be listed for instant sale with correct state updates.
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-fun test_list_nft_instant_sale(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections {
-    setup_test(admin, user1, user2);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-
-    list_nft_for_sale(user1, 0, 1000, SALE_TYPE_INSTANT, option::none());
-    let nft = get_nft_details(0);
-    assert!(nft.for_sale, E_NOT_FOR_SALE);
-    assert!(nft.sale_type == SALE_TYPE_INSTANT, E_INVALID_SALE_TYPE);
-    assert!(nft.price == 1000, E_INVALID_DATA);
-    assert!(option::is_none(&nft.auction), E_INVALID_STATE);
-}
-```
-
-### 5.2 Auction Listing
-
-**Purpose**: Ensure NFTs can be listed for auction with proper auction state initialization.
+**Purpose**: Verify that a single vesting stream is created correctly with valid parameters.
 
 ```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-fun test_list_nft_auction(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections {
+#[test(admin = @blockchain, user1 = @0x123, user2 = @0x456)]
+fun test_create_stream_success(admin: &signer, user1: &signer, user2: &signer) acquires VestingContract, State {
     setup_test(admin, user1, user2);
-    timestamp::fast_forward_seconds(1000);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-
-    list_nft_for_sale(user1, 0, 1000, SALE_TYPE_AUCTION, option::some(2000));
-    let nft = get_nft_details(0);
-    assert!(nft.for_sale, E_NOT_FOR_SALE);
-    assert!(nft.sale_type == SALE_TYPE_AUCTION, E_INVALID_SALE_TYPE);
-    assert!(nft.price == 1000, E_INVALID_DATA);
-    assert!(option::is_some(&nft.auction), E_INVALID_STATE);
-    let auction = option::borrow(&nft.auction);
-    assert!(option::is_some(&auction.deadline), E_INVALID_STATE);
-    assert!(*option::borrow(&auction.deadline) == 2000, E_INVALID_DATA);
-    assert!(vector::length(&auction.offers) == 0, E_INVALID_STATE);
-    assert!(auction.highest_bid == 0, E_INVALID_STATE);
-    assert!(option::is_none(&auction.highest_bidder), E_INVALID_STATE);
-}
-```
-
-### 5.3 Error Cases for Listing
-
-**Non-Owner Listing**:
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-#[expected_failure(abort_code = E_NOT_OWNER)]
-fun test_list_nft_not_owner(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections {
-    setup_test(admin, user1, user2);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    list_nft_for_sale(user2, 0, 1000, SALE_TYPE_INSTANT, option::none());
-}
-```
-
-**Already Listed**:
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-#[expected_failure(abort_code = E_ALREADY_LISTED)]
-fun test_list_nft_already_listed(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections {
-    setup_test(admin, user1, user2);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    list_nft_for_sale(user1, 0, 1000, SALE_TYPE_INSTANT, option::none());
-    list_nft_for_sale(user1, 0, 2000, SALE_TYPE_INSTANT, option::none());
-}
-```
-
-**Invalid Sale Type**:
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-#[expected_failure(abort_code = E_INVALID_SALE_TYPE)]
-fun test_list_nft_invalid_sale_type(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections {
-    setup_test(admin, user1, user2);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    list_nft_for_sale(user1, 0, 1000, 99, option::none());
-}
-```
-
-**Invalid Auction Deadline**:
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-#[expected_failure(abort_code = E_INVALID_DEADLINE)]
-fun test_list_nft_invalid_deadline(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections {
-    setup_test(admin, user1, user2);
-    timestamp::fast_forward_seconds(1000);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    list_nft_for_sale(user1, 0, 1000, SALE_TYPE_AUCTION, option::some(500));
-}
-```
-
-**Why These Tests?**: Listing is a critical function that sets the stage for sales and auctions. Testing ownership, state transitions, and input validation prevents unauthorized listings and ensures economic security.
-
-## 6. Testing Offer Placement
-
-**Purpose**: Verify that offers can be placed on auctions, updating the highest bid and handling refunds correctly.
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-fun test_place_offer(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections, MarketplaceFunds {
-    setup_test(admin, user1, user2);
-    timestamp::fast_forward_seconds(1000);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    list_nft_for_sale(user1, 0, 1000, SALE_TYPE_AUCTION, option::some(2000));
-    let user2_addr = signer::address_of(user2);
-    place_offer(user2, 0, 1500);
-
-    let nft = get_nft_details(0);
-    let auction = option::borrow(&nft.auction);
-    assert!(vector::length(&auction.offers) == 1, E_INVALID_STATE);
-    assert!(auction.highest_bid == 1500, E_INVALID_DATA);
-    assert!(*option::borrow(&auction.highest_bidder) == user2_addr, E_NOT_AUTHORIZED);
-    let offer = vector::borrow(&auction.offers, 0);
-    assert!(offer.amount == 1500, E_INVALID_DATA);
-    assert!(offer.bidder == user2_addr, E_NOT_AUTHORIZED);
-}
-```
-
-### Error Cases for Offer Placement
-
-**NFT Not Found**:
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-#[expected_failure(abort_code = E_NFT_NOT_FOUND)]
-fun test_place_offer_nft_not_found(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, MarketplaceFunds {
-    setup_test(admin, user1, user2);
-    place_offer(user2, 999, 1500);
-}
-```
-
-**Not For Sale**:
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-#[expected_failure(abort_code = E_NOT_FOR_SALE)]
-fun test_place_offer_not_for_sale(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections, MarketplaceFunds {
-    setup_test(admin, user1, user2);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    place_offer(user2, 0, 1500);
-}
-```
-
-**Not an Auction**:
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-#[expected_failure(abort_code = E_NOT_AUCTION)]
-fun test_place_offer_not_auction(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections, MarketplaceFunds {
-    setup_test(admin, user1, user2);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    list_nft_for_sale(user1, 0, 1000, SALE_TYPE_INSTANT, option::none());
-    place_offer(user2, 0, 1500);
-}
-```
-
-**Auction Ended**:
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-#[expected_failure(abort_code = E_AUCTION_ENDED)]
-fun test_place_offer_auction_ended(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections, MarketplaceFunds {
-    setup_test(admin, user1, user2);
-    timestamp::fast_forward_seconds(1000);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    list_nft_for_sale(user1, 0, 1000, SALE_TYPE_AUCTION, option::some(1500));
-    timestamp::fast_forward_seconds(1000);
-    place_offer(user2, 0, 1500);
-}
-```
-
-**Invalid Offer Amount**:
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-#[expected_failure(abort_code = E_INVALID_OFFER)]
-fun test_place_offer_invalid_amount(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections, MarketplaceFunds {
-    setup_test(admin, user1, user2);
-    timestamp::fast_forward_seconds(1000);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    list_nft_for_sale(user1, 0, 1000, SALE_TYPE_AUCTION, option::some(2000));
-    place_offer(user2, 0, 500);
-}
-```
-
-**Why These Tests?**: Offer placement is critical for auctions. These tests ensure bids are valid, funds are locked correctly, and previous bidders are refunded, maintaining economic fairness.
-
-## 7. Testing NFT Purchase (Instant Sale)
-
-**Purpose**: Verify that instant sale purchases transfer ownership, process payments, and update state correctly.
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-fun test_purchase_nft(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections, PermissionRef, MarketplaceFunds {
-    setup_test(admin, user1, user2);
-    let user1_addr = signer::address_of(user1);
-    let user2_addr = signer::address_of(user2);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    list_nft_for_sale(user1, 0, 1000, SALE_TYPE_INSTANT, option::none());
-    let initial_balance_user1 = coin::balance<AptosCoin>(user1_addr);
-    let initial_balance_user2 = coin::balance<AptosCoin>(user2_addr);
-    purchase_nft(user2, 0);
-
-    let nft = get_nft_details(0);
-    assert!(nft.owner == user2_addr, E_NOT_OWNER);
-    assert!(!nft.for_sale, E_INVALID_STATE);
-    assert!(nft.price == 0, E_INVALID_STATE);
-    assert!(nft.sale_type == SALE_TYPE_INSTANT, E_INVALID_SALE_TYPE);
-    assert!(option::is_none(&nft.auction), E_INVALID_STATE);
-    assert!(vector::length(&nft.history) == 1, E_INVALID_STATE);
-    let history = vector::borrow(&nft.history, 0);
-    assert!(history.new_owner == user2_addr, E_NOT_OWNER);
-    assert!(history.seller == user1_addr, E_NOT_AUTHORIZED);
-    assert!(history.amount == 1000, E_INVALID_DATA);
+    deposit(admin, 1000000);
+    let stream_id = string::utf8(b"stream1");
+    let user_addr = signer::address_of(user1);
+    let total_amount = 100000; // 0.001 APT
+    let duration = 86400; // 1 day
+    let cliff = 43200; // 12 hours
     
-    // Verify payment (5% fee)
-    let fee = (1000 * MARKETPLACE_FEE_PERCENT) / 100;
-    let seller_amount = 1000 - fee;
-    assert!(coin::balance<AptosCoin>(user1_addr) == initial_balance_user1 + seller_amount, E_INVALID_BALANCE);
-    assert!(coin::balance<AptosCoin>(user2_addr) == initial_balance_user2 - 1000, E_INVALID_BALANCE);
-}
-```
-
-### Error Cases for Purchase
-
-**NFT Not Found**:
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-#[expected_failure(abort_code = E_NFT_NOT_FOUND)]
-fun test_purchase_nft_not_found(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, PermissionRef, MarketplaceFunds {
-    setup_test(admin, user1, user2);
-    purchase_nft(user2, 999);
-}
-```
-
-**Not For Sale**:
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-#[expected_failure(abort_code = E_NOT_FOR_SALE)]
-fun test_purchase_nft_not_for_sale(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections, PermissionRef, MarketplaceFunds {
-    setup_test(admin, user1, user2);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    purchase_nft(user2, 0);
-}
-```
-
-**Not Instant Sale**:
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-#[expected_failure(abort_code = E_NOT_AUCTION)]
-fun test_purchase_nft_not_instant_sale(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections, PermissionRef, MarketplaceFunds {
-    setup_test(admin, user1, user2);
-    timestamp::fast_forward_seconds(1000);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    list_nft_for_sale(user1, 0, 1000, SALE_TYPE_AUCTION, option::some(2000));
-    purchase_nft(user2, 0);
-}
-```
-
-**Insufficient Balance**:
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-#[expected_failure(abort_code = E_INSUFFICIENT_BALANCE)]
-fun test_purchase_nft_insufficient_balance(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections, PermissionRef, MarketplaceFunds {
-    setup_test(admin, user1, user2);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    list_nft_for_sale(user1, 0, 100000000000, SALE_TYPE_INSTANT, option::none());
-    purchase_nft(user2, 0);
-}
-```
-
-**Why These Tests?**: Purchasing is a core economic function. These tests ensure correct ownership transfer, fee calculation, and payment distribution, preventing financial losses or exploits.
-
-## 8. Testing Auction Finalization
-
-**Purpose**: Verify that auctions can be finalized, transferring NFTs to the highest bidder and funds to the seller.
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-fun test_finalize_auction(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections, PermissionRef, MarketplaceFunds {
-    setup_test(admin, user1, user2);
-    timestamp::fast_forward_seconds(1000);
-    let user1_addr = signer::address_of(user1);
-    let user2_addr = signer::address_of(user2);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    list_nft_for_sale(user1, 0, 1000, SALE_TYPE_AUCTION, option::some(2000));
-    place_offer(user2, 0, 1500);
-    let initial_balance_user1 = coin::balance<AptosCoin>(user1_addr);
-    timestamp::fast_forward_seconds(1000);
-    finalize_auction(user1, 0);
-
-    let nft = get_nft_details(0);
-    assert!(nft.owner == user2_addr, E_NOT_OWNER);
-    assert!(!nft.for_sale, E_INVALID_STATE);
-    assert!(nft.price == 0, E_INVALID_STATE);
-    assert!(nft.sale_type == SALE_TYPE_INSTANT, E_INVALID_SALE_TYPE);
-    assert!(option::is_none(&nft.auction), E_INVALID_STATE);
-    assert!(vector::length(&nft.history) == 1, E_INVALID_STATE);
-    let history = vector::borrow(&nft.history, 0);
-    assert!(history.new_owner == user2_addr, E_NOT_OWNER);
-    assert!(history.seller == user1_addr, E_NOT_AUTHORIZED);
-    assert!(history.amount == 1500, E_INVALID_DATA);
-    assert!(coin::balance<AptosCoin>(user1_addr) == initial_balance_user1 + 1500, E_INVALID_BALANCE);
-}
-```
-
-### Error Cases for Auction Finalization
-
-**Not Owner**:
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-#[expected_failure(abort_code = E_NOT_OWNER)]
-fun test_finalize_auction_not_owner(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections, PermissionRef, MarketplaceFunds {
-    setup_test(admin, user1, user2);
-    timestamp::fast_forward_seconds(1000);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    list_nft_for_sale(user1, 0, 1000, SALE_TYPE_AUCTION, option::some(2000));
-    timestamp::fast_forward_seconds(1000);
-    finalize_auction(user2, 0);
-}
-```
-
-**Not For Sale**:
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-#[expected_failure(abort_code = E_NOT_FOR_SALE)]
-fun test_finalize_auction_not_for_sale(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections, PermissionRef, MarketplaceFunds {
-    setup_test(admin, user1, user2);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    finalize_auction(user1, 0);
-}
-```
-
-**Not an Auction**:
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-#[expected_failure(abort_code = E_NOT_AUCTION)]
-fun test_finalize_auction_not_auction(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections, PermissionRef, MarketplaceFunds {
-    setup_test(admin, user1, user2);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    list_nft_for_sale(user1, 0, 1000, SALE_TYPE_INSTANT, option::none());
-    finalize_auction(user1, 0);
-}
-```
-
-**Auction Not Ended**:
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-#[expected_failure(abort_code = E_AUCTION_NOT_ENDED)]
-fun test_finalize_auction_not_ended(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections, PermissionRef, MarketplaceFunds {
-    setup_test(admin, user1, user2);
-    timestamp::fast_forward_seconds(1000);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    list_nft_for_sale(user1, 0, 1000, SALE_TYPE_AUCTION, option::some(2000));
-    finalize_auction(user1, 0);
-}
-```
-
-**Why These Tests?**: Auction finalization transfers valuable assets and funds. These tests ensure only authorized users can finalize auctions, and only after the deadline, protecting both buyers and sellers.
-
-## 9. Testing NFT Transfer
-
-**Purpose**: Verify that NFTs can be transferred to new owners, clearing sale status.
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-fun test_transfer_nft(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections, PermissionRef {
-    setup_test(admin, user1, user2);
-    let user2_addr = signer::address_of(user2);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    transfer_nft(user1, 0, user2_addr);
-
-    let nft = get_nft_details(0);
-    assert!(nft.owner == user2_addr, E_NOT_OWNER);
-    assert!(!nft.for_sale, E_INVALID_STATE);
-    assert!(nft.price == 0, E_INVALID_STATE);
-    assert!(nft.sale_type == SALE_TYPE_INSTANT, E_INVALID_SALE_TYPE);
-    assert!(option::is_none(&nft.auction), E_INVALID_STATE);
-}
-```
-
-### Error Cases for Transfer
-
-**Not Owner**:
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-#[expected_failure(abort_code = E_NOT_OWNER)]
-fun test_transfer_nft_not_owner(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections, PermissionRef {
-    setup_test(admin, user1, user2);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    transfer_nft(user2, 0, @0x789);
-}
-```
-
-**Same Owner**:
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-#[expected_failure(abort_code = E_SAME_OWNER)]
-fun test_transfer_nft_same_owner(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections, PermissionRef {
-    setup_test(admin, user1, user2);
-    let user1_addr = signer::address_of(user1);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    transfer_nft(user1, 0, user1_addr);
-}
-```
-
-**Why These Tests?**: Transfers are a fundamental NFT operation. These tests ensure only owners can transfer NFTs and prevent redundant transfers, maintaining data integrity.
-
-## 10. Testing Metadata Updates
-
-**Purpose**: Verify that only creators can update NFT metadata.
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-fun test_update_nft_metadata(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections {
-    setup_test(admin, user1, user2);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    update_nft_metadata(
-        user1,
-        0,
-        string::utf8(b"Updated NFT"),
-        string::utf8(b"Updated Description"),
-        string::utf8(b"https://updated.com")
-    );
-
-    let nft = get_nft_details(0);
-    assert!(nft.name == string::utf8(b"Updated NFT"), E_INVALID_DATA);
-    assert!(nft.description == string::utf8(b"Updated Description"), E_INVALID_DATA);
-    assert!(nft.uri == string::utf8(b"https://updated.com"), E_INVALID_DATA);
-}
-```
-
-**Non-Creator Update**:
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-#[expected_failure(abort_code = E_NOT_AUTHORIZED)]
-fun test_update_nft_metadata_not_creator(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections {
-    setup_test(admin, user1, user2);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    update_nft_metadata(
-        user2,
-        0,
-        string::utf8(b"Updated NFT"),
-        string::utf8(b"Updated Description"),
-        string::utf8(b"https://updated.com")
-    );
-}
-```
-
-**Why These Tests?**: Metadata updates affect NFT value and representation. Restricting updates to creators prevents unauthorized changes that could mislead buyers.
-
-## 11. Testing Listing Cancellation
-
-**Purpose**: Verify that listings can be canceled, refunding bidders in auctions with appropriate fees.
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-fun test_cancel_listing_auction(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections, MarketplaceFunds {
-    setup_test(admin, user1, user2);
-    timestamp::fast_forward_seconds(1000);
-    let user2_addr = signer::address_of(user2);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    list_nft_for_sale(user1, 0, 1000, SALE_TYPE_AUCTION, option::some(2000));
-    place_offer(user2, 0, 1500);
-    let initial_balance_user2 = coin::balance<AptosCoin>(user2_addr);
-    cancel_listing(user1, 0);
-
-    let nft = get_nft_details(0);
-    assert!(!nft.for_sale, E_INVALID_STATE);
-    assert!(nft.price == 0, E_INVALID_STATE);
-    assert!(nft.sale_type == SALE_TYPE_INSTANT, E_INVALID_STATE);
-    assert!(option::is_none(&nft.auction), E_INVALID_STATE);
+    create_stream(admin, user_addr, total_amount, duration, cliff, stream_id);
     
-    // Verify refund with 4.5% fee
-    let refund_fee = (1500 * CANCEL_FEE_PERCENT) / 1000;
-    let refund_amount = 1500 + refund_fee;
-    assert!(coin::balance<AptosCoin>(user2_addr) == initial_balance_user2 - 1500 + refund_amount, E_INVALID_BALANCE);
+    let (total, start_time, cliff_time, duration_time, claimed) = get_stream(stream_id);
+    assert!(total == total_amount, 3000);
+    assert!(duration == duration_time, 3001);
+    assert!(cliff == cliff_time, 3002);
+    assert!(claimed == 0, 3003);
+    
+    let contract = borrow_global<VestingContract>(account::create_resource_address(&@blockchain, SEED));
+    assert!(simple_map::contains_key(&contract.streams, &stream_id), 3004);
+    assert!(vector::length(&contract.streams_vec) == 1, 3005);
 }
 ```
 
-**Not For Sale**:
+### 4.2 Error Cases for Single Stream Creation
+
+**Non-Owner Creation**:
 
 ```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-#[expected_failure(abort_code = E_NOT_FOR_SALE)]
-fun test_cancel_listing_not_for_sale(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections, MarketplaceFunds {
-    setup_test(admin, user1, user2);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    cancel_listing(user1, 0);
+#[test(admin = @blockchain, user1 = @0x123)]
+#[expected_failure(abort_code = ERROR_NOT_OWNER)]
+fun test_create_stream_not_owner(admin: &signer, user1: &signer) acquires VestingContract, State {
+    setup_test(admin, user1, user1);
+    deposit(admin, 1000000);
+    let stream_id = string::utf8(b"stream1");
+    create_stream(user1, signer::address_of(user1), 100000, 86400, 43200, stream_id);
 }
 ```
 
-**Why These Tests?**: Canceling listings must properly handle refunds to prevent financial loss for bidders and maintain marketplace integrity.
-
-## 12. Testing View Functions
-
-**Purpose**: Ensure view functions return accurate data for collections, NFTs, and user-owned assets.
+**Stream Already Exists**:
 
 ```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-fun test_view_functions(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections {
-    setup_test(admin, user1, user2);
-    let user1_addr = signer::address_of(user1);
-    initialize_collection(
-        user1,
-        string::utf8(b"Test Collection"),
-        string::utf8(b"Test Description"),
-        string::utf8(b"https://test.com")
-    );
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    list_nft_for_sale(user1, 0, 1000, SALE_TYPE_INSTANT, option::none());
-
-    // Test get_all_collections_by_user
-    let collections = get_all_collections_by_user(user1_addr, 10, 0);
-    assert!(vector::length(&collections) == 1, E_INVALID_STATE);
-    assert!(vector::borrow(&collections, 0).name == string::utf8(b"Test Collection"), E_INVALID_DATA);
-
-    // Test get_all_collections
-    let all_collections = get_all_collections(10, 0);
-    assert!(vector::length(&all_collections) == 1, E_INVALID_STATE);
-
-    // Test get_nft_by_collection_name_and_token_name
-    let nft_opt = get_nft_by_collection_name_and_token_name(
-        string::utf8(b"Test Collection"),
-        string::utf8(b"Test NFT"),
-        user1_addr
-    );
-    assert!(option::is_some(&nft_opt), E_INVALID_STATE);
-    assert!(option::borrow(&nft_opt).name == string::utf8(b"Test NFT"), E_INVALID_DATA);
-
-    // Test get_user_nfts
-    let user_nfts = get_user_nfts(user1_addr);
-    assert!(vector::length(&user_nfts) == 1, E_INVALID_STATE);
-    assert!(vector::borrow(&user_nfts, 0).name == string::utf8(b"Test NFT"), E_INVALID_DATA);
-
-    // Test get_nfts_for_sale
-    let sale_nfts = get_nfts_for_sale();
-    assert!(vector::length(&sale_nfts) == 1, E_INVALID_STATE);
-    assert!(vector::borrow(&sale_nfts, 0).price == 1000, E_INVALID_DATA);
+#[test(admin = @blockchain, user1 = @0x123)]
+#[expected_failure(abort_code = ERROR_STREAM_EXISTS)]
+fun test_create_stream_already_exists(admin: &signer, user1: &signer) acquires VestingContract, State {
+    setup_test(admin, user1, user1);
+    deposit(admin, 1000000);
+    let stream_id = string::utf8(b"stream1");
+    create_stream(admin, signer::address_of(user1), 100000, 86400, 43200, stream_id);
+    create_stream(admin, signer::address_of(user1), 100000, 86400, 43200, stream_id);
 }
 ```
 
-**Why These Tests?**: View functions are critical for front-end integration and user experience. They must return accurate data without leaking unauthorized information.
-
-## 13. Edge Case Testing
-
-**Purpose**: Test boundary conditions like empty strings and maximum values.
+**Zero Duration**:
 
 ```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-fun test_mint_nft_empty_strings(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections {
-    setup_test(admin, user1, user2);
-    mint_nft(
-        user1,
-        string::utf8(b""),
-        option::some(string::utf8(b"")),
-        option::some(string::utf8(b"")),
-        string::utf8(b""),
-        string::utf8(b""),
-        string::utf8(b""),
-        string::utf8(b"")
-    );
-
-    let nft = get_nft_details(0);
-    assert!(nft.collection_name == string::utf8(b""), E_INVALID_DATA);
-    assert!(nft.name == string::utf8(b""), E_INVALID_DATA);
-    assert!(nft.description == string::utf8(b""), E_INVALID_DATA);
-    assert!(nft.uri == string::utf8(b""), E_INVALID_DATA);
-    assert!(nft.category == string::utf8(b""), E_INVALID_DATA);
+#[test(admin = @blockchain, user1 = @0x123)]
+#[expected_failure(abort_code = ERROR_INVALID_DURATION)]
+fun test_create_stream_zero_duration(admin: &signer, user1: &signer) acquires VestingContract, State {
+    setup_test(admin, user1, user1);
+    deposit(admin, 1000000);
+    let stream_id = string::utf8(b"stream1");
+    create_stream(admin, signer::address_of(user1), 100000, 0, 0, stream_id);
 }
 ```
 
-**Why This Matters**: Users may submit empty or malformed inputs. The contract should handle these gracefully to avoid state corruption.
+**Cliff Exceeds Duration**:
 
-## 14. Running Tests
+```move
+#[test(admin = @blockchain, user1 = @0x123)]
+#[expected_failure(abort_code = ERROR_CLIFF_EXCEEDS_DURATION)]
+fun test_create_stream_cliff_exceeds_duration(admin: &signer, user1: &signer) acquires VestingContract, State {
+    setup_test(admin, user1, user1);
+    deposit(admin, 1000000);
+    let stream_id = string::utf8(b"stream1");
+    create_stream(admin, signer::address_of(user1), 100000, 86400, 86401, stream_id);
+}
+```
+
+**Insufficient Funds**:
+
+```move
+#[test(admin = @blockchain, user1 = @0x123)]
+#[expected_failure(abort_code = ERROR_INSUFFICIENT_FUNDS)]
+fun test_create_stream_insufficient_funds(admin: &signer, user1: &signer) acquires VestingContract, State {
+    setup_test(admin, user1, user1);
+    let stream_id = string::utf8(b"stream1");
+    create_stream(admin, signer::address_of(user1), 100000, 86400, 43200, stream_id);
+}
+```
+
+**Why These Tests?**: Stream creation is critical for setting up vesting schedules. These tests ensure only the admin can create streams, parameters are validated, and sufficient funds are available.
+
+## 5. Testing Multiple Stream Creation
+
+### 5.1 Successful Multiple Stream Creation
+
+**Purpose**: Verify that multiple vesting streams can be created in a single transaction.
+
+```move
+#[test(admin = @blockchain, user1 = @0x123, user2 = @0x456)]
+fun test_create_multiple_streams_success(admin: &signer, user1: &signer, user2: &signer) acquires VestingContract, State {
+    setup_test(admin, user1, user2);
+    deposit(admin, 1000000);
+    
+    let users = vector::empty<address>();
+    vector::push_back(&mut users, signer::address_of(user1));
+    vector::push_back(&mut users, signer::address_of(user2));
+    
+    let amounts = vector::empty<u64>();
+    vector::push_back(&mut amounts, 100000);
+    vector::push_back(&mut amounts, 200000);
+    
+    let durations = vector::empty<u64>();
+    vector::push_back(&mut durations, 86400);
+    vector::push_back(&mut durations, 86400);
+    
+    let cliffs = vector::empty<u64>();
+    vector::push_back(&mut cliffs, 43200);
+    vector::push_back(&mut cliffs, 43200);
+    
+    let stream_ids = vector::empty<string::String>();
+    vector::push_back(&mut stream_ids, string::utf8(b"stream1"));
+    vector::push_back(&mut stream_ids, string::utf8(b"stream2"));
+    
+    create_multiple_streams(admin, users, amounts, durations, cliffs, stream_ids);
+    
+    let streams = get_all_streams();
+    assert!(vector::length(&streams) == 2, 4000);
+    
+    let (total1, _, _, _, claimed1) = get_stream(string::utf8(b"stream1"));
+    let (total2, _, _, _, claimed2) = get_stream(string::utf8(b"stream2"));
+    assert!(total1 == 100000, 4001);
+    assert!(total2 == 200000, 4002);
+    assert!(claimed1 == 0, 4003);
+    assert!(claimed2 == 0, 4004);
+}
+```
+
+### 5.2 Error Case for Multiple Stream Creation
+
+**Mismatched Input Vectors**:
+
+```move
+#[test(admin = @blockchain, user1 = @0x123, user2 = @0x456)]
+#[expected_failure(abort_code = ERROR_INVALID_STREAM_IDS)]
+fun test_create_multiple_streams_mismatch(admin: &signer, user1: &signer, user2: &signer) acquires VestingContract, State {
+    setup_test(admin, user1, user2);
+    deposit(admin, 1000000);
+    
+    let users = vector::empty<address>();
+    vector::push_back(&mut users, signer::address_of(user1));
+    
+    let amounts = vector::empty<u64>();
+    vector::push_back(&mut amounts, 100000);
+    
+    let durations = vector::empty<u64>();
+    vector::push_back(&mut durations, 86400);
+    
+    let cliffs = vector::empty<u64>();
+    vector::push_back(&mut cliffs, 43200);
+    
+    let stream_ids = vector::empty<string::String>();
+    create_multiple_streams(admin, users, amounts, durations, cliffs, stream_ids);
+}
+```
+
+**Why These Tests?**: Batch stream creation improves efficiency. These tests ensure correct handling of multiple streams and validation of input consistency.
+
+## 6. Testing Claiming Vested Tokens
+
+### 6.1 Successful Claim
+
+**Purpose**: Verify that beneficiaries can claim vested tokens after the cliff period.
+
+```move
+#[test(admin = @blockchain, user1 = @0x123, user2 = @0x456)]
+fun test_claim_success(admin: &signer, user1: &signer, user2: &signer) acquires VestingContract, State {
+    setup_test(admin, user1, user2);
+    deposit(admin, 1000000);
+    let stream_id = string::utf8(b"stream1");
+    let user_addr = signer::address_of(user1);
+    create_stream(admin, user_addr, 100000, 86400, 0, stream_id);
+    
+    // Fast forward to end of vesting period
+    timestamp::fast_forward_seconds(86400);
+    
+    let initial_balance = coin::balance<AptosCoin>(user_addr);
+    claim(user1, stream_id, 100000);
+    
+    let final_balance = coin::balance<AptosCoin>(user_addr);
+    assert!(final_balance == initial_balance + 100000, 5000);
+    
+    let (_, _, _, _, claimed_amount) = get_stream(stream_id);
+    assert!(claimed_amount == 100000, 5001);
+}
+```
+
+### 6.2 Error Cases for Claiming
+
+**Non-Existent Stream**:
+
+```move
+#[test(admin = @blockchain, user1 = @0x123)]
+#[expected_failure(abort_code = ERROR_STREAM_NOT_FOUND)]
+fun test_claim_nonexistent_stream(admin: &signer, user1: &signer) acquires VestingContract, State {
+    setup_test(admin, user1, user1);
+    deposit(admin, 1000000);
+    claim(user1, string::utf8(b"stream1"), 100000);
+}
+```
+
+**Claim Before Cliff**:
+
+```move
+#[test(admin = @blockchain, user1 = @0x123)]
+#[expected_failure(abort_code = ERROR_CLIFF_HAS_NOT_PASSED)]
+fun test_claim_before_cliff(admin: &signer, user1: &signer) acquires VestingContract, State {
+    setup_test(admin, user1, user1);
+    deposit(admin, 1000000);
+    let stream_id = string::utf8(b"stream1");
+    create_stream(admin, signer::address_of(user1), 100000, 86400, 43200, stream_id);
+    claim(user1, stream_id, 100000);
+}
+```
+
+**Nothing to Claim**:
+
+```move
+#[test(admin = @blockchain, user1 = @0x123)]
+#[expected_failure(abort_code = ERROR_NOTHING_TO_CLAIM)]
+fun test_claim_nothing_to_claim(admin: &signer, user1: &signer) acquires VestingContract, State {
+    setup_test(admin, user1, user1);
+    deposit(admin, 1000000);
+    let stream_id = string::utf8(b"stream1");
+    create_stream(admin, signer::address_of(user1), 100000, 86400, 0, stream_id);
+    timestamp::fast_forward_seconds(86400);
+    claim(user1, stream_id, 100000);
+    claim(user1, stream_id, 1);
+}
+```
+
+**Invalid Claim Amount**:
+
+```move
+#[test(admin = @blockchain, user1 = @0x123)]
+#[expected_failure(abort_code = ERROR_INVALID_AMOUNT)]
+fun test_claim_excessive_amount(admin: &signer, user1: &signer) acquires VestingContract, State {
+    setup_test(admin, user1, user1);
+    deposit(admin, 1000000);
+    let stream_id = string::utf8(b"stream1");
+    create_stream(admin, signer::address_of(user1), 100000, 86400, 0, stream_id);
+    timestamp::fast_forward_seconds(43200);
+    claim(user1, stream_id, 100001);
+}
+```
+
+**Why These Tests?**: Claiming is the primary user interaction. These tests ensure tokens are released correctly, only after the cliff, and within vested limits.
+
+## 7. Testing Vested Amount Calculation
+
+**Purpose**: Verify the `get_vested_amount` function calculates the correct vested amount based on time.
+
+```move
+#[test(admin = @blockchain, user1 = @0x123, user2 = @0x456)]
+fun test_get_vested_amount(admin: &signer, user1: &signer, user2: &signer) acquires VestingContract, State {
+    setup_test(admin, user1, user2);
+    deposit(admin, 1000000);
+    let stream_id = string::utf8(b"stream1");
+    let start_time = timestamp::now_seconds();
+    create_stream(admin, signer::address_of(user1), 100000, 86400, 43200, stream_id);
+    
+    // Before cliff
+    let vested = get_vested_amount(stream_id, start_time);
+    assert!(vested == 0, 6000);
+    
+    // Halfway through vesting (after cliff)
+    let halfway_time = start_time + 64800; // 43200 (cliff) + 21600 (half of remaining)
+    timestamp::fast_forward_seconds(64800);
+    vested = get_vested_amount(stream_id, halfway_time);
+    assert!(vested >= 49999 && vested <= 50001, 6001); // ~50% vested
+    
+    // After full vesting
+    timestamp::fast_forward_seconds(86400);
+    vested = get_vested_amount(stream_id, start_time + 86400);
+    assert!(vested == 100000, 6002);
+}
+```
+
+**Why This Matters**: Accurate vesting calculations ensure beneficiaries receive the correct amount of tokens based on the vesting schedule.
+
+## 8. Testing View Functions
+
+### 8.1 Get Stream Details
+
+**Purpose**: Verify that `get_stream` returns accurate stream data.
+
+```move
+#[test(admin = @blockchain, user1 = @0x123, user2 = @0x456)]
+fun test_get_stream(admin: &signer, user1: &signer, user2: &signer) acquires VestingContract, State {
+    setup_test(admin, user1, user2);
+    deposit(admin, 1000000);
+    let stream_id = string::utf8(b"stream1");
+    let total_amount = 100000;
+    let duration = 86400;
+    let cliff = 43200;
+    create_stream(admin, signer::address_of(user1), total_amount, duration, cliff, stream_id);
+    
+    let (total, start_time, cliff_time, duration_time, claimed) = get_stream(stream_id);
+    assert!(total == total_amount, 7000);
+    assert!(duration == duration_time, 7001);
+    assert!(cliff == cliff_time, 7002);
+    assert!(claimed == 0, 7003);
+}
+```
+
+### 8.2 Get All Streams
+
+**Purpose**: Verify that `get_all_streams` returns all vesting streams.
+
+```move
+#[test(admin = @blockchain, user1 = @0x123, user2 = @0x456)]
+fun test_get_all_streams(admin: &signer, user1: &signer, user2: &signer) acquires VestingContract, State {
+    setup_test(admin, user1, user2);
+    deposit(admin, 1000000);
+    let stream_id1 = string::utf8(b"stream1");
+    let stream_id2 = string::utf8(b"stream2");
+    create_stream(admin, signer::address_of(user1), 100000, 86400, 43200, stream_id1);
+    create_stream(admin, signer::address_of(user2), 200000, 86400, 43200, stream_id2);
+    
+    let streams = get_all_streams();
+    assert!(vector::length(&streams) == 2, 8000);
+    let stream1 = vector::borrow(&streams, 0);
+    let stream2 = vector::borrow(&streams, 1);
+    assert!(stream1.total_amount == 100000, 8001);
+    assert!(stream2.total_amount == 200000, 8002);
+}
+```
+
+### 8.3 Get Streams for User
+
+**Purpose**: Verify that `get_streams_for_user` returns the correct streams for a beneficiary.
+
+```move
+#[test(admin = @blockchain, user1 = @0x123, user2 = @0x456)]
+fun test_get_streams_for_user(admin: &signer, user1: &signer, user2: &signer) acquires VestingContract, State {
+    setup_test(admin, user1, user2);
+    deposit(admin, 1000000);
+    let stream_id1 = string::utf8(b"stream1");
+    let stream_id2 = string::utf8(b"stream2");
+    create_stream(admin, signer::address_of(user1), 100000, 86400, 43200, stream_id1);
+    create_stream(admin, signer::address_of(user1), 200000, 86400, 43200, stream_id2);
+    
+    let streams = get_streams_for_user(signer::address_of(user1));
+    assert!(option::is_some(&streams), 9000);
+    let streams_vec = option::extract(&mut streams);
+    assert!(vector::length(&streams_vec) == 2, 9001);
+    
+    let no_streams = get_streams_for_user(signer::address_of(user2));
+    assert!(option::is_none(&no_streams), 9002);
+}
+```
+
+**Why These Tests?**: View functions are essential for front-end integration, providing accurate stream data for users and administrators.
+
+## 9. Edge Case Testing
+
+**Purpose**: Test boundary conditions like empty stream IDs.
+
+```move
+#[test(admin = @blockchain, user1 = @0x123, user2 = @0x456)]
+fun test_create_stream_empty_id(admin: &signer, user1: &signer, user2: &signer) acquires VestingContract, State {
+    setup_test(admin, user1, user2);
+    deposit(admin, 1000000);
+    let stream_id = string::utf8(b"");
+    create_stream(admin, signer::address_of(user1), 100000, 86400, 43200, stream_id);
+    
+    let (total, _, _, _, _) = get_stream(stream_id);
+    assert!(total == 100000, 10000);
+}
+```
+
+**Why This Matters**: Users may submit empty inputs, and the contract should handle these gracefully to avoid state corruption.
+
+## 10. Running Tests
 
 To execute the tests, use the Aptos CLI:
 
@@ -990,7 +509,7 @@ To execute the tests, use the Aptos CLI:
 aptos move test
 
 # Run specific tests
-aptos move test --filter test_mint_nft
+aptos move test --filter test_create_stream_success
 
 # Verbose output for debugging
 aptos move test --verbose
@@ -999,27 +518,27 @@ aptos move test --verbose
 aptos move test --coverage
 ```
 
-**Coverage Importance**: High test coverage ensures all code paths are exercised, reducing the risk of untested vulnerabilities.
+**Coverage Importance**: High test coverage ensures all code paths, including edge cases and error conditions, are tested, reducing the risk of vulnerabilities.
 
-## 15. Best Practices Summary
+## 11. Best Practices Summary
 
-- **Comprehensive Setup**: Initialize a realistic blockchain environment with timestamps and funds.
-- **Success and Failure Testing**: Use `#[expected_failure]` to verify error handling.
-- **Descriptive Error Codes**: Use constants like `E_NOT_OWNER` for clear failure messages.
-- **Edge Cases**: Test empty inputs and boundary conditions.
-- **State Verification**: Check all state changes after operations.
-- **Isolation**: Ensure tests are independent and deterministic.
-- **Clear Naming**: Use descriptive test names like `test_mint_nft_empty_strings`.
-- **Documentation**: Comment tests to explain the rationale behind scenarios.
+- **Comprehensive Setup**: Initializes timestamps, coins, and module state for realistic testing.
+- **Success and Failure Testing**: Uses `#[expected_failure]` to verify error handling for invalid inputs and unauthorized actions.
+- **Descriptive Error Codes**: Employs constants like `ERROR_NOT_OWNER` and `ERROR_NOTHING_TO_CLAIM` for clear error reporting.
+- **Edge Cases**: Tests empty stream IDs to ensure robust input handling.
+- **State Verification**: Checks contract state, balances, and event emissions after operations.
+- **Isolation**: Ensures tests are independent and deterministic.
+- **Clear Naming**: Uses descriptive test names like `test_claim_success`.
+- **Documentation**: Comments explain the purpose of each test scenario.
 
-## 16. Why This Testing Matters
+## 12. Why This Testing Matters
 
-Testing the NFT Marketplace contract ensures:
+Testing the vesting contract ensures:
 
-- **Financial Security**: Protects user funds during purchases and auctions.
-- **Data Integrity**: Maintains accurate NFT ownership and metadata.
-- **User Trust**: Prevents unauthorized actions that could erode confidence.
-- **Economic Fairness**: Ensures fees and refunds are processed correctly.
+- **Financial Security**: Protects funds by ensuring only the admin can deposit and create streams.
+- **Vesting Accuracy**: Maintains correct vesting schedules and claimable amounts.
+- **Access Control**: Ensures only authorized users (admin for deposits/streams, beneficiaries for claims) can interact.
+- **User Trust**: Prevents unauthorized claims and ensures accurate token distribution.
 - **Integration Safety**: Provides reliable view functions for front-end applications.
 
-By thoroughly testing all scenarios, you mitigate the risk of costly bugs in an immutable blockchain environment, safeguarding both users and the protocol's reputation.
+By thoroughly testing all scenarios, you mitigate the risk of costly bugs in an immutable blockchain environment, safeguarding users and the vesting system's integrity.

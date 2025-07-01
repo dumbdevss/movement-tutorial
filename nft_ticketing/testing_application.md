@@ -1,10 +1,10 @@
-# Testing the NFT Marketplace Smart Contract
+# Testing the Ticket NFT Smart Contract
 
-This section outlines a comprehensive testing strategy for the NFT Marketplace smart contract written in Move. The tests cover all critical functionalities, including module initialization, collection creation, NFT minting, listing, purchasing, auction management, transfers, and view functions. Each test ensures the contract behaves as expected under both success and failure conditions, adhering to the principles outlined in the provided document management system testing guide.
+This section outlines a comprehensive testing strategy for the Ticket NFT smart contract written in Move. The tests cover all critical functionalities, including module initialization, soulbound and transferable ticket minting, ticket transfers, ticket validation, and view functions. Each test ensures the contract behaves as expected under both success and failure conditions, adhering to the principles outlined in the provided document management system testing guide.
 
 ## 1. Test Environment Setup
 
-The test environment setup initializes the blockchain state, including timestamps, coin systems, and account balances, to simulate a realistic economic environment.
+The test environment setup initializes the blockchain state, including timestamps, coin systems, and account balances, to simulate a realistic economic environment for ticket purchases.
 
 ```move
 #[test_only]
@@ -13,975 +13,508 @@ fun setup_test(
     user1: &signer,
     user2: &signer,
 ) {
-    // Initialize timestamp system for auction deadlines
+    // Initialize timestamp system for purchase and usage times
     let aptos_framework = account::create_account_for_test(@aptos_framework);
     timestamp::set_time_has_started_for_testing(&aptos_framework);
 
     // Initialize APT coin system for payments
     let (burn_cap, mint_cap) = aptos_coin::initialize_for_test(&aptos_framework);
     
-    // Fund test accounts with 100 APT (8 decimal places)
-    give_coins(&mint_cap, admin, 10000000000);
-    give_coins(&mint_cap, user1, 10000000000);
-    give_coins(&mint_cap, user2, 10000000000);
+    // Fund test accounts with 1000 APT (8 decimal places)
+    give_coins(&mint_cap, admin, 1000000000000);
+    give_coins(&mint_cap, user1, 1000000000000);
+    give_coins(&mint_cap, user2, 1000000000000);
 
     // Clean up capabilities
     coin::destroy_burn_cap(burn_cap);
     coin::destroy_mint_cap(mint_cap);
 
-    // Initialize the marketplace module
+    // Initialize the ticketing module
     init_module(admin);
 }
 ```
 
 **Why This Setup?**
 
-- **Timestamps**: Required for auction deadlines and history tracking.
-- **Coin System**: Ensures users can pay for NFTs and fees.
-- **Resource Account**: The marketplace uses a resource account to manage fees, which must be initialized and funded.
-- **Module Initialization**: Sets up the marketplace's global state, including empty NFT and collection vectors.
+- **Timestamps**: Required for tracking ticket purchase and usage times.
+- **Coin System**: Ensures users can pay the ticket price (100 APT).
+- **Resource Account**: The ticketing system uses a resource account to manage funds, which must be initialized and registered for AptosCoin.
+- **Module Initialization**: Sets up the ticket collection and global state, including ticket counters and event handles.
 
 ## 2. Testing Module Initialization
 
-**Purpose**: Verify that the marketplace initializes correctly, creating necessary resources and registering for AptosCoin.
+**Purpose**: Verify that the ticketing module initializes correctly, creating the collection, resource account, and necessary resources.
 
 ```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-fun test_init_module(admin: &signer, user1: &signer, user2: &signer) {
+#[test(admin = @ticket_nft, user1 = @0x11, user2 = @0x12)]
+fun test_init_module(admin: &signer, user1: &signer, user2: &signer) acquires TicketState, ResourceAccountCap {
     setup_test(admin, user1, user2);
-    let resource_addr = account::create_resource_address(&@marketplace, SEED);
+    let resource_addr = account::create_resource_address(&@ticket_nft, SEED);
     
     // Verify resource account and structures
-    assert!(exists<Marketplace>(resource_addr), E_NOT_INITIALIZED);
-    assert!(exists<MarketplaceFunds>(@marketplace), E_NO_SIGNER_CAP);
-    assert!(exists<Collections>(@marketplace), E_NOT_INITIALIZED);
+    assert!(exists<TicketState>(resource_addr), E_NOT_INITIALIZED);
+    assert!(exists<TicketStore>(resource_addr), E_NOT_INITIALIZED);
+    assert!(exists<ResourceAccountCap>(@ticket_nft), E_NO_SIGNER_CAP);
     
     // Verify resource account is registered for APT
     assert!(coin::is_account_registered<AptosCoin>(resource_addr), E_NOT_INITIALIZED);
     
     // Verify initial state
-    let marketplace = borrow_global<Marketplace>(resource_addr);
-    assert!(vector::length(&marketplace.nfts) == 0, E_INVALID_STATE);
+    let state = borrow_global<TicketState>(resource_addr);
+    assert!(state.ticket_counter == 0, E_INVALID_STATE);
+    assert!(state.max_tickets == 1000, E_INVALID_STATE);
 }
 ```
 
-**Why This Matters**: Initialization bugs could prevent the marketplace from functioning, as all operations rely on the resource account and global state.
+**Why This Matters**: Initialization bugs could prevent ticket minting or fund management, breaking the entire ticketing system.
 
-## 3. Testing Collection Initialization
+## 3. Testing Soulbound Ticket Minting
 
-**Purpose**: Ensure collections are created correctly and stored in the global state.
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-fun test_initialize_collection(admin: &signer, user1: &signer, user2: &signer) acquires Collections {
-    setup_test(admin, user1, user2);
-    let creator_addr = signer::address_of(user1);
-    initialize_collection(
-        user1,
-        string::utf8(b"Test Collection"),
-        string::utf8(b"Test Description"),
-        string::utf8(b"https://test.com")
-    );
-
-    // Verify collection details
-    let collections = get_all_collections(10, 0);
-    assert!(vector::length(&collections) == 1, E_INVALID_STATE);
-    let collection = vector::borrow(&collections, 0);
-    assert!(collection.name == string::utf8(b"Test Collection"), E_INVALID_DATA);
-    assert!(collection.description == string::utf8(b"Test Description"), E_INVALID_DATA);
-    assert!(collection.uri == string::utf8(b"https://test.com"), E_INVALID_DATA);
-    assert!(collection.creator == creator_addr, E_NOT_AUTHORIZED);
-}
-```
-
-**Why This Matters**: Collections are the foundation for NFT organization. Incorrect initialization could lead to metadata errors or unauthorized access.
-
-## 4. Testing NFT Minting
-
-**Purpose**: Verify that NFTs are minted correctly, stored in the marketplace, and have proper initial state.
+**Purpose**: Ensure soulbound tickets are minted correctly, stored in the `TicketStore`, and have proper initial state.
 
 ```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-fun test_mint_nft(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections {
-    setup_test(admin, user1, user2);
-    let creator_addr = signer::address_of(user1);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-
-    // Verify NFT details
-    let nft = get_nft_details(0);
-    assert!(nft.id == 0, E_INVALID_DATA);
-    assert!(nft.owner == creator_addr, E_NOT_OWNER);
-    assert!(nft.creator == creator_addr, E_NOT_AUTHORIZED);
-    assert!(nft.collection_name == string::utf8(b"Test Collection"), E_INVALID_DATA);
-    assert!(nft.name == string::utf8(b"Test NFT"), E_INVALID_DATA);
-    assert!(nft.description == string::utf8(b"NFT Description"), E_INVALID_DATA);
-    assert!(nft.uri == string::utf8(b"https://nft.com"), E_INVALID_DATA);
-    assert!(nft.category == string::utf8(b"Art"), E_INVALID_DATA);
-    assert!(nft.price == 0, E_INVALID_STATE);
-    assert!(!nft.for_sale, E_INVALID_STATE);
-    assert!(nft.sale_type == SALE_TYPE_INSTANT, E_INVALID_SALE_TYPE);
-    assert!(option::is_none(&nft.auction), E_INVALID_STATE);
-    assert!(vector::length(&nft.history) == 0, E_INVALID_STATE);
-}
-```
-
-**Why This Matters**: Minting is the entry point for NFTs into the marketplace. Errors here could result in invalid tokens or ownership issues, breaking the entire system.
-
-## 5. Testing NFT Listing
-
-### 5.1 Instant Sale Listing
-
-**Purpose**: Verify that NFTs can be listed for instant sale with correct state updates.
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-fun test_list_nft_instant_sale(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections {
-    setup_test(admin, user1, user2);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-
-    list_nft_for_sale(user1, 0, 1000, SALE_TYPE_INSTANT, option::none());
-    let nft = get_nft_details(0);
-    assert!(nft.for_sale, E_NOT_FOR_SALE);
-    assert!(nft.sale_type == SALE_TYPE_INSTANT, E_INVALID_SALE_TYPE);
-    assert!(nft.price == 1000, E_INVALID_DATA);
-    assert!(option::is_none(&nft.auction), E_INVALID_STATE);
-}
-```
-
-### 5.2 Auction Listing
-
-**Purpose**: Ensure NFTs can be listed for auction with proper auction state initialization.
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-fun test_list_nft_auction(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections {
-    setup_test(admin, user1, user2);
-    timestamp::fast_forward_seconds(1000);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-
-    list_nft_for_sale(user1, 0, 1000, SALE_TYPE_AUCTION, option::some(2000));
-    let nft = get_nft_details(0);
-    assert!(nft.for_sale, E_NOT_FOR_SALE);
-    assert!(nft.sale_type == SALE_TYPE_AUCTION, E_INVALID_SALE_TYPE);
-    assert!(nft.price == 1000, E_INVALID_DATA);
-    assert!(option::is_some(&nft.auction), E_INVALID_STATE);
-    let auction = option::borrow(&nft.auction);
-    assert!(option::is_some(&auction.deadline), E_INVALID_STATE);
-    assert!(*option::borrow(&auction.deadline) == 2000, E_INVALID_DATA);
-    assert!(vector::length(&auction.offers) == 0, E_INVALID_STATE);
-    assert!(auction.highest_bid == 0, E_INVALID_STATE);
-    assert!(option::is_none(&auction.highest_bidder), E_INVALID_STATE);
-}
-```
-
-### 5.3 Error Cases for Listing
-
-**Non-Owner Listing**:
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-#[expected_failure(abort_code = E_NOT_OWNER)]
-fun test_list_nft_not_owner(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections {
-    setup_test(admin, user1, user2);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    list_nft_for_sale(user2, 0, 1000, SALE_TYPE_INSTANT, option::none());
-}
-```
-
-**Already Listed**:
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-#[expected_failure(abort_code = E_ALREADY_LISTED)]
-fun test_list_nft_already_listed(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections {
-    setup_test(admin, user1, user2);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    list_nft_for_sale(user1, 0, 1000, SALE_TYPE_INSTANT, option::none());
-    list_nft_for_sale(user1, 0, 2000, SALE_TYPE_INSTANT, option::none());
-}
-```
-
-**Invalid Sale Type**:
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-#[expected_failure(abort_code = E_INVALID_SALE_TYPE)]
-fun test_list_nft_invalid_sale_type(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections {
-    setup_test(admin, user1, user2);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    list_nft_for_sale(user1, 0, 1000, 99, option::none());
-}
-```
-
-**Invalid Auction Deadline**:
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-#[expected_failure(abort_code = E_INVALID_DEADLINE)]
-fun test_list_nft_invalid_deadline(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections {
-    setup_test(admin, user1, user2);
-    timestamp::fast_forward_seconds(1000);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    list_nft_for_sale(user1, 0, 1000, SALE_TYPE_AUCTION, option::some(500));
-}
-```
-
-**Why These Tests?**: Listing is a critical function that sets the stage for sales and auctions. Testing ownership, state transitions, and input validation prevents unauthorized listings and ensures economic security.
-
-## 6. Testing Offer Placement
-
-**Purpose**: Verify that offers can be placed on auctions, updating the highest bid and handling refunds correctly.
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-fun test_place_offer(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections, MarketplaceFunds {
-    setup_test(admin, user1, user2);
-    timestamp::fast_forward_seconds(1000);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    list_nft_for_sale(user1, 0, 1000, SALE_TYPE_AUCTION, option::some(2000));
-    let user2_addr = signer::address_of(user2);
-    place_offer(user2, 0, 1500);
-
-    let nft = get_nft_details(0);
-    let auction = option::borrow(&nft.auction);
-    assert!(vector::length(&auction.offers) == 1, E_INVALID_STATE);
-    assert!(auction.highest_bid == 1500, E_INVALID_DATA);
-    assert!(*option::borrow(&auction.highest_bidder) == user2_addr, E_NOT_AUTHORIZED);
-    let offer = vector::borrow(&auction.offers, 0);
-    assert!(offer.amount == 1500, E_INVALID_DATA);
-    assert!(offer.bidder == user2_addr, E_NOT_AUTHORIZED);
-}
-```
-
-### Error Cases for Offer Placement
-
-**NFT Not Found**:
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-#[expected_failure(abort_code = E_NFT_NOT_FOUND)]
-fun test_place_offer_nft_not_found(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, MarketplaceFunds {
-    setup_test(admin, user1, user2);
-    place_offer(user2, 999, 1500);
-}
-```
-
-**Not For Sale**:
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-#[expected_failure(abort_code = E_NOT_FOR_SALE)]
-fun test_place_offer_not_for_sale(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections, MarketplaceFunds {
-    setup_test(admin, user1, user2);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    place_offer(user2, 0, 1500);
-}
-```
-
-**Not an Auction**:
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-#[expected_failure(abort_code = E_NOT_AUCTION)]
-fun test_place_offer_not_auction(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections, MarketplaceFunds {
-    setup_test(admin, user1, user2);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    list_nft_for_sale(user1, 0, 1000, SALE_TYPE_INSTANT, option::none());
-    place_offer(user2, 0, 1500);
-}
-```
-
-**Auction Ended**:
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-#[expected_failure(abort_code = E_AUCTION_ENDED)]
-fun test_place_offer_auction_ended(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections, MarketplaceFunds {
-    setup_test(admin, user1, user2);
-    timestamp::fast_forward_seconds(1000);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    list_nft_for_sale(user1, 0, 1000, SALE_TYPE_AUCTION, option::some(1500));
-    timestamp::fast_forward_seconds(1000);
-    place_offer(user2, 0, 1500);
-}
-```
-
-**Invalid Offer Amount**:
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-#[expected_failure(abort_code = E_INVALID_OFFER)]
-fun test_place_offer_invalid_amount(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections, MarketplaceFunds {
-    setup_test(admin, user1, user2);
-    timestamp::fast_forward_seconds(1000);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    list_nft_for_sale(user1, 0, 1000, SALE_TYPE_AUCTION, option::some(2000));
-    place_offer(user2, 0, 500);
-}
-```
-
-**Why These Tests?**: Offer placement is critical for auctions. These tests ensure bids are valid, funds are locked correctly, and previous bidders are refunded, maintaining economic fairness.
-
-## 7. Testing NFT Purchase (Instant Sale)
-
-**Purpose**: Verify that instant sale purchases transfer ownership, process payments, and update state correctly.
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-fun test_purchase_nft(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections, PermissionRef, MarketplaceFunds {
+#[test(admin = @ticket_nft, user1 = @0x11, user2 = @0x12)]
+fun test_mint_soulbound_ticket(admin: &signer, user1: &signer, user2: &signer) acquires TicketState, TicketStore, TicketInfo, ResourceAccountCap {
     setup_test(admin, user1, user2);
     let user1_addr = signer::address_of(user1);
-    let user2_addr = signer::address_of(user2);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    list_nft_for_sale(user1, 0, 1000, SALE_TYPE_INSTANT, option::none());
-    let initial_balance_user1 = coin::balance<AptosCoin>(user1_addr);
-    let initial_balance_user2 = coin::balance<AptosCoin>(user2_addr);
-    purchase_nft(user2, 0);
-
-    let nft = get_nft_details(0);
-    assert!(nft.owner == user2_addr, E_NOT_OWNER);
-    assert!(!nft.for_sale, E_INVALID_STATE);
-    assert!(nft.price == 0, E_INVALID_STATE);
-    assert!(nft.sale_type == SALE_TYPE_INSTANT, E_INVALID_SALE_TYPE);
-    assert!(option::is_none(&nft.auction), E_INVALID_STATE);
-    assert!(vector::length(&nft.history) == 1, E_INVALID_STATE);
-    let history = vector::borrow(&nft.history, 0);
-    assert!(history.new_owner == user2_addr, E_NOT_OWNER);
-    assert!(history.seller == user1_addr, E_NOT_AUTHORIZED);
-    assert!(history.amount == 1000, E_INVALID_DATA);
+    let event_id = 1;
+    let metadata_hash = string::utf8(b"ipfs://Qm1");
+    let token_name = string::utf8(b"Soulbound Ticket #1");
+    let token_uri = string::utf8(b"https://example.com/ticket1");
     
-    // Verify payment (5% fee)
-    let fee = (1000 * MARKETPLACE_FEE_PERCENT) / 100;
-    let seller_amount = 1000 - fee;
-    assert!(coin::balance<AptosCoin>(user1_addr) == initial_balance_user1 + seller_amount, E_INVALID_BALANCE);
-    assert!(coin::balance<AptosCoin>(user2_addr) == initial_balance_user2 - 1000, E_INVALID_BALANCE);
+    mint_soulbound_ticket(user1, event_id, metadata_hash, token_name, token_uri);
+    
+    // Verify ticket count
+    let ticket_count = get_ticket_count();
+    assert!(ticket_count == 1, E_INVALID_STATE);
+    
+    // Verify ticket details
+    let resource_addr = get_resource_address(@ticket_nft);
+    let ticket_store = borrow_global<TicketStore>(resource_addr);
+    let ticket_obj = table::borrow(&ticket_store.token_addresses, 0);
+    let ticket_addr = object::object_address(ticket_obj);
+    let ticket = borrow_global<TicketInfo>(ticket_addr);
+    
+    assert!(ticket.ticket_id == 0, E_INVALID_DATA);
+    assert!(ticket.metadata_hash == metadata_hash, E_INVALID_DATA);
+    assert!(ticket.event_id == event_id, E_INVALID_DATA);
+    assert!(!ticket.is_used, E_INVALID_STATE);
+    assert!(ticket.owner == user1_addr, E_NOT_AUTHORIZED);
+    assert!(ticket.is_soulbound, E_INVALID_STATE);
+    assert!(ticket.purchase_time == timestamp::now_seconds(), E_INVALID_DATA);
+    assert!(ticket.usage_time == 0, E_INVALID_STATE);
 }
 ```
 
-### Error Cases for Purchase
+**Why This Matters**: Soulbound tickets are non-transferable and critical for events requiring verified ownership. Errors could lead to invalid tickets or incorrect ownership.
 
-**NFT Not Found**:
+## 4. Testing Transferable Ticket Minting
 
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-#[expected_failure(abort_code = E_NFT_NOT_FOUND)]
-fun test_purchase_nft_not_found(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, PermissionRef, MarketplaceFunds {
-    setup_test(admin, user1, user2);
-    purchase_nft(user2, 999);
-}
-```
-
-**Not For Sale**:
+**Purpose**: Verify that transferable tickets are minted correctly and allow transfers.
 
 ```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-#[expected_failure(abort_code = E_NOT_FOR_SALE)]
-fun test_purchase_nft_not_for_sale(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections, PermissionRef, MarketplaceFunds {
-    setup_test(admin, user1, user2);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    purchase_nft(user2, 0);
-}
-```
-
-**Not Instant Sale**:
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-#[expected_failure(abort_code = E_NOT_AUCTION)]
-fun test_purchase_nft_not_instant_sale(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections, PermissionRef, MarketplaceFunds {
-    setup_test(admin, user1, user2);
-    timestamp::fast_forward_seconds(1000);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    list_nft_for_sale(user1, 0, 1000, SALE_TYPE_AUCTION, option::some(2000));
-    purchase_nft(user2, 0);
-}
-```
-
-**Insufficient Balance**:
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-#[expected_failure(abort_code = E_INSUFFICIENT_BALANCE)]
-fun test_purchase_nft_insufficient_balance(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections, PermissionRef, MarketplaceFunds {
-    setup_test(admin, user1, user2);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    list_nft_for_sale(user1, 0, 100000000000, SALE_TYPE_INSTANT, option::none());
-    purchase_nft(user2, 0);
-}
-```
-
-**Why These Tests?**: Purchasing is a core economic function. These tests ensure correct ownership transfer, fee calculation, and payment distribution, preventing financial losses or exploits.
-
-## 8. Testing Auction Finalization
-
-**Purpose**: Verify that auctions can be finalized, transferring NFTs to the highest bidder and funds to the seller.
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-fun test_finalize_auction(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections, PermissionRef, MarketplaceFunds {
-    setup_test(admin, user1, user2);
-    timestamp::fast_forward_seconds(1000);
-    let user1_addr = signer::address_of(user1);
-    let user2_addr = signer::address_of(user2);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    list_nft_for_sale(user1, 0, 1000, SALE_TYPE_AUCTION, option::some(2000));
-    place_offer(user2, 0, 1500);
-    let initial_balance_user1 = coin::balance<AptosCoin>(user1_addr);
-    timestamp::fast_forward_seconds(1000);
-    finalize_auction(user1, 0);
-
-    let nft = get_nft_details(0);
-    assert!(nft.owner == user2_addr, E_NOT_OWNER);
-    assert!(!nft.for_sale, E_INVALID_STATE);
-    assert!(nft.price == 0, E_INVALID_STATE);
-    assert!(nft.sale_type == SALE_TYPE_INSTANT, E_INVALID_SALE_TYPE);
-    assert!(option::is_none(&nft.auction), E_INVALID_STATE);
-    assert!(vector::length(&nft.history) == 1, E_INVALID_STATE);
-    let history = vector::borrow(&nft.history, 0);
-    assert!(history.new_owner == user2_addr, E_NOT_OWNER);
-    assert!(history.seller == user1_addr, E_NOT_AUTHORIZED);
-    assert!(history.amount == 1500, E_INVALID_DATA);
-    assert!(coin::balance<AptosCoin>(user1_addr) == initial_balance_user1 + 1500, E_INVALID_BALANCE);
-}
-```
-
-### Error Cases for Auction Finalization
-
-**Not Owner**:
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-#[expected_failure(abort_code = E_NOT_OWNER)]
-fun test_finalize_auction_not_owner(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections, PermissionRef, MarketplaceFunds {
-    setup_test(admin, user1, user2);
-    timestamp::fast_forward_seconds(1000);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    list_nft_for_sale(user1, 0, 1000, SALE_TYPE_AUCTION, option::some(2000));
-    timestamp::fast_forward_seconds(1000);
-    finalize_auction(user2, 0);
-}
-```
-
-**Not For Sale**:
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-#[expected_failure(abort_code = E_NOT_FOR_SALE)]
-fun test_finalize_auction_not_for_sale(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections, PermissionRef, MarketplaceFunds {
-    setup_test(admin, user1, user2);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    finalize_auction(user1, 0);
-}
-```
-
-**Not an Auction**:
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-#[expected_failure(abort_code = E_NOT_AUCTION)]
-fun test_finalize_auction_not_auction(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections, PermissionRef, MarketplaceFunds {
-    setup_test(admin, user1, user2);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    list_nft_for_sale(user1, 0, 1000, SALE_TYPE_INSTANT, option::none());
-    finalize_auction(user1, 0);
-}
-```
-
-**Auction Not Ended**:
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-#[expected_failure(abort_code = E_AUCTION_NOT_ENDED)]
-fun test_finalize_auction_not_ended(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections, PermissionRef, MarketplaceFunds {
-    setup_test(admin, user1, user2);
-    timestamp::fast_forward_seconds(1000);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    list_nft_for_sale(user1, 0, 1000, SALE_TYPE_AUCTION, option::some(2000));
-    finalize_auction(user1, 0);
-}
-```
-
-**Why These Tests?**: Auction finalization transfers valuable assets and funds. These tests ensure only authorized users can finalize auctions, and only after the deadline, protecting both buyers and sellers.
-
-## 9. Testing NFT Transfer
-
-**Purpose**: Verify that NFTs can be transferred to new owners, clearing sale status.
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-fun test_transfer_nft(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections, PermissionRef {
-    setup_test(admin, user1, user2);
-    let user2_addr = signer::address_of(user2);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    transfer_nft(user1, 0, user2_addr);
-
-    let nft = get_nft_details(0);
-    assert!(nft.owner == user2_addr, E_NOT_OWNER);
-    assert!(!nft.for_sale, E_INVALID_STATE);
-    assert!(nft.price == 0, E_INVALID_STATE);
-    assert!(nft.sale_type == SALE_TYPE_INSTANT, E_INVALID_SALE_TYPE);
-    assert!(option::is_none(&nft.auction), E_INVALID_STATE);
-}
-```
-
-### Error Cases for Transfer
-
-**Not Owner**:
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-#[expected_failure(abort_code = E_NOT_OWNER)]
-fun test_transfer_nft_not_owner(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections, PermissionRef {
-    setup_test(admin, user1, user2);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    transfer_nft(user2, 0, @0x789);
-}
-```
-
-**Same Owner**:
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-#[expected_failure(abort_code = E_SAME_OWNER)]
-fun test_transfer_nft_same_owner(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections, PermissionRef {
+#[test(admin = @ticket_nft, user1 = @0x11, user2 = @0x12)]
+fun test_mint_transferable_ticket(admin: &signer, user1: &signer, user2: &signer) acquires TicketState, TicketStore, TicketInfo, ResourceAccountCap {
     setup_test(admin, user1, user2);
     let user1_addr = signer::address_of(user1);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    transfer_nft(user1, 0, user1_addr);
+    let event_id = 2;
+    let metadata_hash = string::utf8(b"ipfs://Qm2");
+    let token_name = string::utf8(b"Transferable Ticket #1");
+    let token_uri = string::utf8(b"https://example.com/ticket2");
+    
+    mint_transferable_ticket(user1, event_id, metadata_hash, token_name, token_uri);
+    
+    // Verify ticket count
+    let ticket_count = get_ticket_count();
+    assert!(ticket_count == 1, E_INVALID_STATE);
+    
+    // Verify ticket details
+    let resource_addr = get_resource_address(@ticket_nft);
+    let ticket_store = borrow_global<TicketStore>(resource_addr);
+    let ticket_obj = table::borrow(&ticket_store.token_addresses, 0);
+    let ticket_addr = object::object_address(ticket_obj);
+    let ticket = borrow_global<TicketInfo>(ticket_addr);
+    
+    assert!(ticket.ticket_id == 0, E_INVALID_DATA);
+    assert!(ticket.metadata_hash == metadata_hash, E_INVALID_DATA);
+    assert!(ticket.event_id == event_id, E_INVALID_DATA);
+    assert!(!ticket.is_used, E_INVALID_STATE);
+    assert!(ticket.owner == user1_addr, E_NOT_AUTHORIZED);
+    assert!(!ticket.is_soulbound, E_INVALID_STATE);
+    assert!(ticket.purchase_time == timestamp::now_seconds(), E_INVALID_DATA);
+    assert!(ticket.usage_time == 0, E_INVALID_STATE);
 }
 ```
 
-**Why These Tests?**: Transfers are a fundamental NFT operation. These tests ensure only owners can transfer NFTs and prevent redundant transfers, maintaining data integrity.
+**Why This Matters**: Transferable tickets allow secondary markets, so correct minting ensures flexibility while maintaining data integrity.
 
-## 10. Testing Metadata Updates
+## 5. Testing Ticket Transfer
 
-**Purpose**: Verify that only creators can update NFT metadata.
+### 5.1 Successful Transfer
+
+**Purpose**: Verify that transferable tickets can be transferred to new owners.
 
 ```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-fun test_update_nft_metadata(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections {
+#[test(admin = @ticket_nft, user1 = @0x11, user2 = @0x12)]
+fun test_transfer_ticket(admin: &signer, user1: &signer, user2: &signer) acquires TicketState, TicketStore, TicketInfo, ResourceAccountCap {
     setup_test(admin, user1, user2);
-    mint_nft(
+    let user2_addr = signer::address_of(user2);
+    
+    mint_transferable_ticket(
         user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
+        1,
+        string::utf8(b"ipfs://Qm1"),
+        string::utf8(b"Transferable Ticket #1"),
+        string::utf8(b"https://example.com/ticket1")
     );
-    update_nft_metadata(
-        user1,
-        0,
-        string::utf8(b"Updated NFT"),
-        string::utf8(b"Updated Description"),
-        string::utf8(b"https://updated.com")
-    );
-
-    let nft = get_nft_details(0);
-    assert!(nft.name == string::utf8(b"Updated NFT"), E_INVALID_DATA);
-    assert!(nft.description == string::utf8(b"Updated Description"), E_INVALID_DATA);
-    assert!(nft.uri == string::utf8(b"https://updated.com"), E_INVALID_DATA);
+    
+    let resource_addr = get_resource_address(@ticket_nft);
+    let ticket_store = borrow_global<TicketStore>(resource_addr);
+    let ticket_obj = table::borrow(&ticket_store.token_addresses, 0);
+    
+    transfer_ticket(user1, user2_addr, *ticket_obj);
+    
+    let (is_used, owner, _, _, is_soulbound) = get_ticket_status(*ticket_obj);
+    assert!(owner == user2_addr, E_NOT_AUTHORIZED);
+    assert!(!is_used, E_INVALID_STATE);
+    assert!(!is_soulbound, E_INVALID_STATE);
 }
 ```
 
-**Non-Creator Update**:
+### 5.2 Error Cases for Transfer
+
+**Soulbound Ticket Transfer**:
 
 ```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
+#[test(admin = @ticket_nft, user1 = @0x11, user2 = @0x12)]
 #[expected_failure(abort_code = E_NOT_AUTHORIZED)]
-fun test_update_nft_metadata_not_creator(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections {
+fun test_transfer_soulbound_ticket(admin: &signer, user1: &signer, user2: &signer) acquires TicketState, TicketStore, TicketInfo, ResourceAccountCap {
     setup_test(admin, user1, user2);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    update_nft_metadata(
-        user2,
-        0,
-        string::utf8(b"Updated NFT"),
-        string::utf8(b"Updated Description"),
-        string::utf8(b"https://updated.com")
-    );
-}
-```
-
-**Why These Tests?**: Metadata updates affect NFT value and representation. Restricting updates to creators prevents unauthorized changes that could mislead buyers.
-
-## 11. Testing Listing Cancellation
-
-**Purpose**: Verify that listings can be canceled, refunding bidders in auctions with appropriate fees.
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-fun test_cancel_listing_auction(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections, MarketplaceFunds {
-    setup_test(admin, user1, user2);
-    timestamp::fast_forward_seconds(1000);
-    let user2_addr = signer::address_of(user2);
-    mint_nft(
-        user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
-    );
-    list_nft_for_sale(user1, 0, 1000, SALE_TYPE_AUCTION, option::some(2000));
-    place_offer(user2, 0, 1500);
-    let initial_balance_user2 = coin::balance<AptosCoin>(user2_addr);
-    cancel_listing(user1, 0);
-
-    let nft = get_nft_details(0);
-    assert!(!nft.for_sale, E_INVALID_STATE);
-    assert!(nft.price == 0, E_INVALID_STATE);
-    assert!(nft.sale_type == SALE_TYPE_INSTANT, E_INVALID_STATE);
-    assert!(option::is_none(&nft.auction), E_INVALID_STATE);
     
-    // Verify refund with 4.5% fee
-    let refund_fee = (1500 * CANCEL_FEE_PERCENT) / 1000;
-    let refund_amount = 1500 + refund_fee;
-    assert!(coin::balance<AptosCoin>(user2_addr) == initial_balance_user2 - 1500 + refund_amount, E_INVALID_BALANCE);
-}
-```
-
-**Not For Sale**:
-
-```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-#[expected_failure(abort_code = E_NOT_FOR_SALE)]
-fun test_cancel_listing_not_for_sale(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections, MarketplaceFunds {
-    setup_test(admin, user1, user2);
-    mint_nft(
+    mint_soulbound_ticket(
         user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
+        1,
+        string::utf8(b"ipfs://Qm1"),
+        string::utf8(b"Soulbound Ticket #1"),
+        string::utf8(b"https://example.com/ticket1")
     );
-    cancel_listing(user1, 0);
+    
+    let resource_addr = get_resource_address(@ticket_nft);
+    let ticket_store = borrow_global<TicketStore>(resource_addr);
+    let ticket_obj = table::borrow(&ticket_store.token_addresses, 0);
+    
+    transfer_ticket(user1, signer::address_of(user2), *ticket_obj);
 }
 ```
 
-**Why These Tests?**: Canceling listings must properly handle refunds to prevent financial loss for bidders and maintain marketplace integrity.
-
-## 12. Testing View Functions
-
-**Purpose**: Ensure view functions return accurate data for collections, NFTs, and user-owned assets.
+**Non-Owner Transfer**:
 
 ```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-fun test_view_functions(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections {
+#[test(admin = @ticket_nft, user1 = @0x11, user2 = @0x12)]
+#[expected_failure(abort_code = E_NOT_AUTHORIZED)]
+fun test_transfer_non_owner(admin: &signer, user1: &signer, user2: &signer) acquires TicketState, TicketStore, TicketInfo, ResourceAccountCap {
+    setup_test(admin, user1, user2);
+    
+    mint_transferable_ticket(
+        user1,
+        1,
+        string::utf8(b"ipfs://Qm1"),
+        string::utf8(b"Transferable Ticket #1"),
+        string::utf8(b"https://example.com/ticket1")
+    );
+    
+    let resource_addr = get_resource_address(@ticket_nft);
+    let ticket_store = borrow_global<TicketStore>(resource_addr);
+    let ticket_obj = table::borrow(&ticket_store.token_addresses, 0);
+    
+    transfer_ticket(user2, signer::address_of(user1), *ticket_obj);
+}
+```
+
+**Used Ticket Transfer**:
+
+```move
+#[test(admin = @ticket_nft, user1 = @0x11, user2 = @0x12)]
+#[expected_failure(abort_code = E_TICKET_USED)]
+fun test_transfer_used_ticket(admin: &signer, user1: &signer, user2: &signer) acquires TicketState, TicketStore, TicketInfo, ResourceAccountCap {
+    setup_test(admin, user1, user2);
+    
+    mint_transferable_ticket(
+        user1,
+        1,
+        string::utf8(b"ipfs://Qm1"),
+        string::utf8(b"Transferable Ticket #1"),
+        string::utf8(b"https://example.com/ticket1")
+    );
+    
+    let resource_addr = get_resource_address(@ticket_nft);
+    let ticket_store = borrow_global<TicketStore>(resource_addr);
+    let ticket_obj = table::borrow(&ticket_store.token_addresses, 0);
+    
+    validate_ticket(user1, *ticket_obj);
+    transfer_ticket(user1, signer::address_of(user2), *ticket_obj);
+}
+```
+
+**Why These Tests?**: Transfers are critical for transferable tickets. These tests ensure only valid transfers occur, protecting event integrity and user rights.
+
+## 6. Testing Ticket Validation
+
+**Purpose**: Verify that tickets can be validated by their owners, updating the usage state.
+
+```move
+#[test(admin = @ticket_nft, user1 = @0x11, user2 = @0x12)]
+fun test_validate_ticket(admin: &signer, user1: &signer, user2: &signer) acquires TicketState, TicketStore, TicketInfo, ResourceAccountCap {
+    setup_test(admin, user1, user2);
+    
+    mint_soulbound_ticket(
+        user1,
+        1,
+        string::utf8(b"ipfs://Qm1"),
+        string::utf8(b"Soulbound Ticket #1"),
+        string::utf8(b"https://example.com/ticket1")
+    );
+    
+    let resource_addr = get_resource_address(@ticket_nft);
+    let ticket_store = borrow_global<TicketStore>(resource_addr);
+    let ticket_obj = table::borrow(&ticket_store.token_addresses, 0);
+    
+    validate_ticket(user1, *ticket_obj);
+    
+    let (is_used, owner, _, _, _) = get_ticket_status(*ticket_obj);
+    assert!(is_used, E_INVALID_STATE);
+    assert!(owner == signer::address_of(user1), E_NOT_AUTHORIZED);
+}
+```
+
+### Error Cases for Validation
+
+**Non-Owner Validation**:
+
+```move
+#[test(admin = @ticket_nft, user1 = @0x11, user2 = @0x12)]
+#[expected_failure(abort_code = E_NOT_AUTHORIZED)]
+fun test_validate_non_owner(admin: &signer, user1: &signer, user2: &signer) acquires TicketState, TicketStore, TicketInfo, ResourceAccountCap {
+    setup_test(admin, user1, user2);
+    
+    mint_soulbound_ticket(
+        user1,
+        1,
+        string::utf8(b"ipfs://Qm1"),
+        string::utf8(b"Soulbound Ticket #1"),
+        string::utf8(b"https://example.com/ticket1")
+    );
+    
+    let resource_addr = get_resource_address(@ticket_nft);
+    let ticket_store = borrow_global<TicketStore>(resource_addr);
+    let ticket_obj = table::borrow(&ticket_store.token_addresses, 0);
+    
+    validate_ticket(user2, *ticket_obj);
+}
+```
+
+**Already Used Ticket**:
+
+```move
+#[test(admin = @ticket_nft, user1 = @0x11, user2 = @0x12)]
+#[expected_failure(abort_code = E_TICKET_USED)]
+fun test_validate_used_ticket(admin: &signer, user1: &signer, user2: &signer) acquires TicketState, TicketStore, TicketInfo, ResourceAccountCap {
+    setup_test(admin, user1, user2);
+    
+    mint_soulbound_ticket(
+        user1,
+        1,
+        string::utf8(b"ipfs://Qm1"),
+        string::utf8(b"Soulbound Ticket #1"),
+        string::utf8(b"https://example.com/ticket1")
+    );
+    
+    let resource_addr = get_resource_address(@ticket_nft);
+    let ticket_store = borrow_global<TicketStore>(resource_addr);
+    let ticket_obj = table::borrow(&ticket_store.token_addresses, 0);
+    
+    validate_ticket(user1, *ticket_obj);
+    validate_ticket(user1, *ticket_obj);
+}
+```
+
+**Why These Tests?**: Validation ensures tickets are used only once by authorized owners, critical for event access control.
+
+## 7. Testing Insufficient Funds
+
+**Purpose**: Verify that minting fails when a user lacks sufficient APT.
+
+```move
+#[test(admin = @ticket_nft, user1 = @0x11, user2 = @0x12)]
+#[expected_failure(abort_code = E_INSUFFICIENT_FUNDS)]
+fun test_mint_insufficient_funds(admin: &signer, user1: &signer, user2: &signer) acquires TicketState, TicketStore, ResourceAccountCap {
+    setup_test(admin, user1, user2);
+    
+    // Drain user1's funds
+    let user_addr = signer::address_of(user1);
+    let balance = coin::balance<AptosCoin>(user_addr);
+    let coins = coin::withdraw<AptosCoin>(user1, balance);
+    coin::deposit(get_resource_address(@ticket_nft), coins);
+    
+    mint_soulbound_ticket(
+        user1,
+        1,
+        string::utf8(b"ipfs://Qm1"),
+        string::utf8(b"Soulbound Ticket #1"),
+        string::utf8(b"https://example.com/ticket1")
+    );
+}
+```
+
+**Why This Matters**: Ensures economic security by preventing users from minting tickets without sufficient funds.
+
+## 8. Testing Ticket Limit
+
+**Purpose**: Verify that the contract enforces the maximum ticket limit (1000).
+
+```move
+#[test(admin = @ticket_nft, user1 = @0x11, user2 = @0x12)]
+#[expected_failure(abort_code = E_TICKET_LIMIT_REACHED)]
+fun test_mint_limit_reached(admin: &signer, user1: &signer, user2: &signer) acquires TicketState, TicketStore, ResourceAccountCap {
+    setup_test(admin, user1, user2);
+    
+    // Mint 1000 tickets
+    let i = 0;
+    while (i < 1000) {
+        let token_name = string_utils::format1(&b"Ticket #{}", i);
+        let token_uri = string_utils::format1(&b"https://example.com/ticket{}", i);
+        mint_transferable_ticket(
+            user1,
+            1,
+            string::utf8(b"ipfs://Qm1"),
+            token_name,
+            token_uri
+        );
+        i = i + 1;
+    };
+    
+    // Attempt to mint one more
+    mint_transferable_ticket(
+        user1,
+        1,
+        string::utf8(b"ipfs://Qm1"),
+        string::utf8(b"Ticket #1000"),
+        string::utf8(b"https://example.com/ticket1000")
+    );
+}
+```
+
+**Why This Matters**: The ticket limit prevents oversupply, ensuring event capacity constraints are respected.
+
+## 9. Testing View Functions
+
+**Purpose**: Ensure view functions return accurate data about tickets and user ownership.
+
+```move
+#[test(admin = @ticket_nft, user1 = @0x11, user2 = @0x12)]
+fun test_view_functions(admin: &signer, user1: &signer, user2: &signer) acquires TicketState, TicketStore, TicketInfo, ResourceAccountCap {
     setup_test(admin, user1, user2);
     let user1_addr = signer::address_of(user1);
-    initialize_collection(
+    
+    // Mint two tickets
+    mint_soulbound_ticket(
         user1,
-        string::utf8(b"Test Collection"),
-        string::utf8(b"Test Description"),
-        string::utf8(b"https://test.com")
+        1,
+        string::utf8(b"ipfs://Qm1"),
+        string::utf8(b"Soulbound Ticket #1"),
+        string::utf8(b"https://example.com/ticket1")
     );
-    mint_nft(
+    mint_transferable_ticket(
         user1,
-        string::utf8(b"Test Collection"),
-        option::some(string::utf8(b"Test Description")),
-        option::some(string::utf8(b"https://test.com")),
-        string::utf8(b"Test NFT"),
-        string::utf8(b"NFT Description"),
-        string::utf8(b"Art"),
-        string::utf8(b"https://nft.com")
+        2,
+        string::utf8(b"ipfs://Qm2"),
+        string::utf8(b"Transferable Ticket #1"),
+        string::utf8(b"https://example.com/ticket2")
     );
-    list_nft_for_sale(user1, 0, 1000, SALE_TYPE_INSTANT, option::none());
-
-    // Test get_all_collections_by_user
-    let collections = get_all_collections_by_user(user1_addr, 10, 0);
-    assert!(vector::length(&collections) == 1, E_INVALID_STATE);
-    assert!(vector::borrow(&collections, 0).name == string::utf8(b"Test Collection"), E_INVALID_DATA);
-
-    // Test get_all_collections
-    let all_collections = get_all_collections(10, 0);
-    assert!(vector::length(&all_collections) == 1, E_INVALID_STATE);
-
-    // Test get_nft_by_collection_name_and_token_name
-    let nft_opt = get_nft_by_collection_name_and_token_name(
-        string::utf8(b"Test Collection"),
-        string::utf8(b"Test NFT"),
-        user1_addr
-    );
-    assert!(option::is_some(&nft_opt), E_INVALID_STATE);
-    assert!(option::borrow(&nft_opt).name == string::utf8(b"Test NFT"), E_INVALID_DATA);
-
-    // Test get_user_nfts
-    let user_nfts = get_user_nfts(user1_addr);
-    assert!(vector::length(&user_nfts) == 1, E_INVALID_STATE);
-    assert!(vector::borrow(&user_nfts, 0).name == string::utf8(b"Test NFT"), E_INVALID_DATA);
-
-    // Test get_nfts_for_sale
-    let sale_nfts = get_nfts_for_sale();
-    assert!(vector::length(&sale_nfts) == 1, E_INVALID_STATE);
-    assert!(vector::borrow(&sale_nfts, 0).price == 1000, E_INVALID_DATA);
+    
+    // Test get_ticket_count
+    let ticket_count = get_ticket_count();
+    assert!(ticket_count == 2, E_INVALID_STATE);
+    
+    // Test get_tickets_by_user
+    let user_tickets = get_tickets_by_user(user1_addr);
+    assert!(vector::length(&user_tickets) == 2, E_INVALID_STATE);
+    
+    let ticket1 = vector::borrow(&user_tickets, 0);
+    assert!(ticket1.event_id == 1, E_INVALID_DATA);
+    assert!(ticket1.is_soulbound, E_INVALID_STATE);
+    
+    let ticket2 = vector::borrow(&user_tickets, 1);
+    assert!(ticket2.event_id == 2, E_INVALID_DATA);
+    assert!(!ticket2.is_soulbound, E_INVALID_STATE);
+    
+    // Test get_ticket_status
+    let resource_addr = get_resource_address(@ticket_nft);
+    let ticket_store = borrow_global<TicketStore>(resource_addr);
+    let ticket_obj = table::borrow(&ticket_store.token_addresses, 0);
+    let (is_used, owner, event_id, metadata_hash, is_soulbound) = get_ticket_status(*ticket_obj);
+    assert!(!is_used, E_INVALID_STATE);
+    assert!(owner == user1_addr, E_NOT_AUTHORIZED);
+    assert!(event_id == 1, E_INVALID_DATA);
+    assert!(metadata_hash == string::utf8(b"ipfs://Qm1"), E_INVALID_DATA);
+    assert!(is_soulbound, E_INVALID_STATE);
 }
 ```
 
-**Why These Tests?**: View functions are critical for front-end integration and user experience. They must return accurate data without leaking unauthorized information.
-
-## 13. Edge Case Testing
-
-**Purpose**: Test boundary conditions like empty strings and maximum values.
+**Non-Existent Ticket Status**:
 
 ```move
-#[test(admin = @marketplace, user1 = @0x456, user2 = @0x789)]
-fun test_mint_nft_empty_strings(admin: &signer, user1: &signer, user2: &signer) acquires Marketplace, Collections {
+#[test(admin = @ticket_nft, user1 = @0x11, user2 = @0x12)]
+#[expected_failure(abort_code = E_TICKET_NOT_FOUND)]
+fun test_get_status_non_existent(admin: &signer, user1: &signer, user2: &signer) acquires TicketInfo, ResourceAccountCap {
     setup_test(admin, user1, user2);
-    mint_nft(
+    
+    let resource_signer = get_resource_signer();
+    let constructor_ref = token::create(
+        &resource_signer,
+        string::utf8(COLLECTION_NAME),
+        string::utf8(b"Soulbound Event Ticket"),
+        string::utf8(b"Fake Ticket"),
+        option::none(),
+        string::utf8(b"https://example.com/fake")
+    );
+    let fake_token = object::object_from_constructor_ref<Token>(&constructor_ref);
+    
+    get_ticket_status(fake_token);
+}
+```
+
+**Why These Tests?**: View functions are essential for front-end integration, providing accurate ticket data for users and event organizers.
+
+## 10. Edge Case Testing
+
+**Purpose**: Test boundary conditions like empty strings for metadata.
+
+```move
+#[test(admin = @ticket_nft, user1 = @0x11, user2 = @0x12)]
+fun test_mint_empty_strings(admin: &signer, user1: &signer, user2: &signer) acquires TicketState, TicketStore, TicketInfo, ResourceAccountCap {
+    setup_test(admin, user1, user2);
+    
+    mint_soulbound_ticket(
         user1,
-        string::utf8(b""),
-        option::some(string::utf8(b"")),
-        option::some(string::utf8(b"")),
-        string::utf8(b""),
+        1,
         string::utf8(b""),
         string::utf8(b""),
         string::utf8(b"")
     );
-
-    let nft = get_nft_details(0);
-    assert!(nft.collection_name == string::utf8(b""), E_INVALID_DATA);
-    assert!(nft.name == string::utf8(b""), E_INVALID_DATA);
-    assert!(nft.description == string::utf8(b""), E_INVALID_DATA);
-    assert!(nft.uri == string::utf8(b""), E_INVALID_DATA);
-    assert!(nft.category == string::utf8(b""), E_INVALID_DATA);
+    
+    let resource_addr = get_resource_address(@ticket_nft);
+    let ticket_store = borrow_global<TicketStore>(resource_addr);
+    let ticket_obj = table::borrow(&ticket_store.token_addresses, 0);
+    let ticket = borrow_global<TicketInfo>(object::object_address(ticket_obj));
+    
+    assert!(ticket.metadata_hash == string::utf8(b""), E_INVALID_DATA);
 }
 ```
 
-**Why This Matters**: Users may submit empty or malformed inputs. The contract should handle these gracefully to avoid state corruption.
+**Why This Matters**: Users may submit empty inputs, and the contract should handle these gracefully to avoid state corruption.
 
-## 14. Running Tests
+## 11. Running Tests
 
 To execute the tests, use the Aptos CLI:
 
@@ -990,7 +523,7 @@ To execute the tests, use the Aptos CLI:
 aptos move test
 
 # Run specific tests
-aptos move test --filter test_mint_nft
+aptos move test --filter test_mint_soulbound_ticket
 
 # Verbose output for debugging
 aptos move test --verbose
@@ -1001,25 +534,25 @@ aptos move test --coverage
 
 **Coverage Importance**: High test coverage ensures all code paths are exercised, reducing the risk of untested vulnerabilities.
 
-## 15. Best Practices Summary
+## 12. Best Practices Summary
 
-- **Comprehensive Setup**: Initialize a realistic blockchain environment with timestamps and funds.
-- **Success and Failure Testing**: Use `#[expected_failure]` to verify error handling.
-- **Descriptive Error Codes**: Use constants like `E_NOT_OWNER` for clear failure messages.
-- **Edge Cases**: Test empty inputs and boundary conditions.
-- **State Verification**: Check all state changes after operations.
-- **Isolation**: Ensure tests are independent and deterministic.
-- **Clear Naming**: Use descriptive test names like `test_mint_nft_empty_strings`.
-- **Documentation**: Comment tests to explain the rationale behind scenarios.
+- **Comprehensive Setup**: Initializes a realistic blockchain environment with timestamps and funds.
+- **Success and Failure Testing**: Uses `#[expected_failure]` to verify error handling for unauthorized actions and invalid states.
+- **Descriptive Error Codes**: Uses constants like `E_NOT_AUTHORIZED` and `E_TICKET_USED` for clear error messages.
+- **Edge Cases**: Tests empty inputs to ensure robust handling.
+- **State Verification**: Checks all state changes after operations (e.g., ticket count, ownership).
+- **Isolation**: Ensures tests are independent and deterministic.
+- **Clear Naming**: Uses descriptive test names like `test_mint_soulbound_ticket`.
+- **Documentation**: Comments explain the purpose of each test scenario.
 
-## 16. Why This Testing Matters
+## 13. Why This Testing Matters
 
-Testing the NFT Marketplace contract ensures:
+Testing the Ticket NFT contract ensures:
 
-- **Financial Security**: Protects user funds during purchases and auctions.
-- **Data Integrity**: Maintains accurate NFT ownership and metadata.
-- **User Trust**: Prevents unauthorized actions that could erode confidence.
-- **Economic Fairness**: Ensures fees and refunds are processed correctly.
+- **Financial Security**: Protects user funds during ticket purchases.
+- **Data Integrity**: Maintains accurate ticket ownership and usage status.
+- **Event Access Control**: Ensures only authorized owners can validate tickets, preventing fraud.
+- **User Trust**: Prevents unauthorized transfers or validations, maintaining confidence.
 - **Integration Safety**: Provides reliable view functions for front-end applications.
 
-By thoroughly testing all scenarios, you mitigate the risk of costly bugs in an immutable blockchain environment, safeguarding both users and the protocol's reputation.
+By thoroughly testing all scenarios, you mitigate the risk of costly bugs in an immutable blockchain environment, safeguarding both users and the event ticketing system's reputation.

@@ -535,7 +535,8 @@ public entry fun buy_token(
 
 Implement token swapping functionality:
 
-### Swap APT to Token (TODO 16):
+### Swap APT to Token (TODO 16)
+
 ```move
 public entry fun swap_move_to_token(
     sender: &signer,
@@ -575,38 +576,60 @@ public entry fun swap_move_to_token(
 }
 ```
 
-### Swap Token to APT (TODO 17):
+### Swap Token to APT (TODO 17)
+
 ```move
-public entry fun swap_token_to_move(
-    sender: &signer,
-    token_addr: address,
-    token_amount: u64
-) acquires LiquidityPool, Token, AppConfig {
-    assert!(token_amount > 0, ERR_ZERO_AMOUNT);
-    
-    let token = borrow_global_mut<Token>(token_addr);
-    let pool_addr = token.pool_addr;
-    assert!(pool_exists(pool_addr), ERR_POOL_NOT_FOUND);
-    
-    let lp = borrow_global_mut<LiquidityPool>(pool_addr);
-    let move_out = get_output_amount(token_amount, lp.token_reserve, lp.move_reserve);
-    assert!(move_out > 0, INSUFFICIENT_LIQUIDITY);
-    
-    let sender_addr = signer::address_of(sender);
-    
-    // Transfer tokens to pool
-    primary_fungible_store::transfer(sender, lp.token_address, pool_addr, token_amount);
-    
-    // Transfer APT to seller
-    let pool_signer = account::create_signer_with_capability(&lp.signer_cap);
-    coin::transfer<AptosCoin>(&pool_signer, sender_addr, move_out);
-    
-    // Update reserves
-    lp.token_reserve = lp.token_reserve + token_amount;
-    lp.move_reserve = lp.move_reserve - move_out;
-    
-    // Update prices and record history...
-}
+ public entry fun swap_token_to_move(
+        sender: &signer,
+        token_addr: address,
+        token_amount: u64
+    ) acquires LiquidityPool, Token, AppConfig {
+        assert!(token_amount > 0, ERR_ZERO_AMOUNT);
+
+        assert!(token_exists(token_addr), ERR_TOKEN_NOT_FOUND);
+        let token = borrow_global_mut<Token>(token_addr); // Verify token exists
+        
+        let pool_addr = token.pool_addr;
+        assert!(pool_exists(pool_addr), ERR_POOL_NOT_FOUND);
+        let lp = borrow_global_mut<LiquidityPool>(pool_addr);
+
+        let move_out = get_output_amount(token_amount, lp.token_reserve, lp.move_reserve);
+        assert!(move_out > 0, INSUFFICIENT_LIQUIDITY);
+
+        let sender_addr = signer::address_of(sender);
+
+        assert!(primary_fungible_store::balance(sender_addr, object::address_to_object<Metadata>(token_addr)) >= token_amount, ERR_INSUFFICIENT_BALANCE);
+
+        primary_fungible_store::transfer(sender, lp.token_address, pool_addr, token_amount);
+        let pool_signer = account::create_signer_with_capability(&lp.signer_cap);
+        coin::transfer<AptosCoin>(&pool_signer, sender_addr, move_out);
+
+        lp.token_reserve = lp.token_reserve + token_amount;
+        lp.move_reserve = lp.move_reserve - move_out;
+
+        let current_price = get_output_amount((MOVE_MULTIPLIER * MOVE_MULTIPLIER), lp.token_reserve, lp.move_reserve);
+        token.current_price = current_price;
+        let app_config = borrow_global_mut<AppConfig>(@pump_fun);
+        let i = 0;
+        let len = vector::length(&app_config.tokens);
+        while (i < len) {
+            let t = vector::borrow_mut(&mut app_config.tokens, i);
+            if (t.token_addr == token.token_addr) {
+                t.current_price = current_price;
+                break
+            };
+            i = i + 1;
+        };
+
+        record_history(
+            token_addr,
+            move_out,
+            token_amount,
+            string::utf8(b"sell"),
+            pool_addr,
+            sender_addr
+        );
+    }
 ```
 
 ---
@@ -689,53 +712,28 @@ public fun getAllHistory(): vector<History> acquires AppConfig {
 
 ## Testing Your Contract
 
-### 1. Create a Token
-```bash
-aptos move run \
-  --function-id default::pump_for_fun::create_token \
-  --args \
-    string:"Doge Meme" \
-    string:"DOGE" \
-    u64:1000000000 \
-    string:"The best meme token" \
-    'option<string>:["https://t.me/dogememe"]' \
-    'option<string>:["@dogememe"]' \
-    'option<string>:null' \
-    string:"https://example.com/doge.png" \
-    string:"https://dogememe.com" \
-    u64:100000000
-```
 
-### 2. Buy Tokens
-```bash
-aptos move run \
-  --function-id default::pump_for_fun::buy_token \
-  --args address:TOKEN_ADDRESS u64:50000000
-```
-
-### 3. Check Token Info
-```bash
-aptos move view \
-  --function-id default::pump_for_fun::get_all_tokens
-```
 
 ---
 
 ## Key Concepts Explained
 
 ### Automated Market Maker (AMM)
+
 - Uses constant product formula: `x * y = k`
 - No order books needed
 - Automatic price discovery
 - Liquidity providers earn fees
 
 ### Token Economics
+
 - 5% to creator (prevents rug pulls)
 - 95% to liquidity pool
 - 0.3% trading fee
 - Platform creation fee
 
 ### Security Features
+
 - Admin controls for metadata updates
 - Input validation on all functions
 - Proper error handling
